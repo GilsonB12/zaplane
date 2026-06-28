@@ -1,20 +1,21 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Plus, MoreVertical,
-  Check, Send, ChevronRight, ChevronLeft,
-  Users, CheckCheck, ShieldCheck, BadgeCheck, Zap,
-  AlertTriangle, Phone, CreditCard, UserCog,
-  FileText, Info, ArrowUpRight, ArrowDownRight, CircleDot,
-  Star,
+  ChevronRight,
+  Users, CheckCheck, ShieldCheck, BadgeCheck,
+  Phone, CreditCard, UserCog,
+  Info, ArrowUpRight, ArrowDownRight, CircleDot,
+  Star, Send,
 } from "lucide-react";
 import {
-  BRAND, TEAL, Card, StatusBadge,
-  CategoryTag, ProgressBar, WhatsAppBubble, PrimaryBtn, Topbar, Sidebar,
+  BRAND, TEAL, Card,
+  ProgressBar, PrimaryBtn, Topbar, Sidebar,
 } from "./components/ui.jsx";
 import { AuthProvider, useAuth } from "./auth/AuthContext.jsx";
 import Login from "./screens/Login.jsx";
 import Contatos, { ImportModal } from "./screens/Contatos.jsx";
 import Templates from "./screens/Templates.jsx";
+import Campanhas, { NovaCampanha, CampanhaDetalhe } from "./screens/Campanhas.jsx";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
 } from "recharts";
@@ -37,29 +38,6 @@ const ENVIOS_14D = [
   { dia: "24/06", enviadas: 6420 }, { dia: "25/06", enviadas: 6128 },
 ];
 
-const CAMPANHAS = [
-  { id: "c1", nome: "Black Friday — Aquecimento", template: "bf_aquecimento_v2", status: "enviando",
-    total: 8400, enviadas: 5210, entregues: 5012, lidas: 3380, falhas: 198, categoria: "Marketing", quando: "Hoje, 09:12" },
-  { id: "c2", nome: "Confirmação de pedido", template: "pedido_confirmado", status: "concluida",
-    total: 1240, enviadas: 1240, entregues: 1228, lidas: 1102, falhas: 12, categoria: "Utility", quando: "Ontem, 18:40" },
-  { id: "c3", nome: "Recuperação de carrinho", template: "carrinho_abandonado", status: "concluida",
-    total: 3120, enviadas: 3120, entregues: 2998, lidas: 1870, falhas: 122, categoria: "Marketing", quando: "23/06, 14:20" },
-  { id: "c4", nome: "Pesquisa NPS pós-venda", template: "nps_pos_venda", status: "rascunho",
-    total: 2050, enviadas: 0, entregues: 0, lidas: 0, falhas: 0, categoria: "Utility", quando: "—" },
-  { id: "c5", nome: "Código de verificação", template: "otp_login", status: "falha",
-    total: 640, enviadas: 410, entregues: 120, lidas: 0, falhas: 290, categoria: "Authentication", quando: "22/06, 11:05" },
-];
-
-
-// Templates de exemplo para o wizard NovaCampanha (apenas aprovados — mock local)
-const TEMPLATES_WIZARD = [
-  { id: "t1", nome: "bf_aquecimento_v2", categoria: "Marketing", status: "aprovado", idioma: "pt_BR",
-    corpo: "Oi {{1}}! 🛍️ A Black Friday da nossa loja começou. Você tem *15% OFF* exclusivo até amanhã. Toque para ver as ofertas.", botoes: ["Ver ofertas", "Sair da lista"] },
-  { id: "t2", nome: "pedido_confirmado", categoria: "Utility", status: "aprovado", idioma: "pt_BR",
-    corpo: "Olá {{1}}, seu pedido *{{2}}* foi confirmado e já está em separação. Acompanhe o status pelo link.", botoes: ["Acompanhar pedido"] },
-  { id: "t4", nome: "otp_login", categoria: "Authentication", status: "aprovado", idioma: "pt_BR",
-    corpo: "Seu código de verificação é *{{1}}*. Ele expira em 5 minutos. Não compartilhe com ninguém.", botoes: ["Copiar código"] },
-];
 
 const MEMBROS = [
   { id: 1, nome: "Ana Beatriz", email: "ana@zaplane.com.br", papel: "Owner" },
@@ -161,18 +139,11 @@ function Dashboard({ setScreen, openCampaign }) {
               </tr>
             </thead>
             <tbody>
-              {CAMPANHAS.map((c) => (
-                <tr key={c.id} onClick={() => openCampaign(c.id)} className="cursor-pointer border-b border-zinc-100 last:border-0 hover:bg-zinc-50/80 dark:border-zinc-800/60 dark:hover:bg-zinc-800/30">
-                  <td className="px-5 py-3">
-                    <div className="font-medium text-zinc-800 dark:text-zinc-100">{c.nome}</div>
-                    <div className="text-[11px] text-zinc-400">{c.template} · <CategoryTag cat={c.categoria} /></div>
-                  </td>
-                  <td className="px-3 py-3"><StatusBadge status={c.status} /></td>
-                  <td className="px-3 py-3"><div className="w-32"><ProgressBar value={c.enviadas} total={c.total} color={c.status === "falha" ? "#ef4444" : BRAND} /></div></td>
-                  <td className="px-3 py-3 text-right tabular-nums text-zinc-600 dark:text-zinc-300">{c.enviadas.toLocaleString("pt-BR")}<span className="text-zinc-300 dark:text-zinc-600"> / {c.total.toLocaleString("pt-BR")}</span></td>
-                  <td className="px-5 py-3 text-[13px] text-zinc-500 dark:text-zinc-400">{c.quando}</td>
-                </tr>
-              ))}
+              <tr>
+                <td colSpan={5} className="px-5 py-6 text-center text-[13px] text-zinc-400">
+                  Acesse a tela de Campanhas para ver os disparos recentes.
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -182,289 +153,7 @@ function Dashboard({ setScreen, openCampaign }) {
 }
 
 /* Contatos e ImportModal foram movidos para ./screens/Contatos.jsx */
-
-/* ----------------------------- Nova campanha (wizard) ----------------------------- */
-function NovaCampanha({ setScreen }) {
-  const [step, setStep] = useState(1);
-  const [publico, setPublico] = useState("vip");
-  const [tplId, setTplId] = useState("t1");
-  const tpl = TEMPLATES_WIZARD.find((t) => t.id === tplId);
-
-  const PUBLICOS = {
-    vip:    { nome: "Lista · Clientes VIP", total: 4280, suprimidos: 96 },
-    sudeste:{ nome: "Segmento · DDD do Sudeste (11,21,31…)", total: 9120, suprimidos: 410 },
-    leads:  { nome: "Segmento · Tag “Lead” + consentido", total: 2640, suprimidos: 612 },
-  };
-  const p = PUBLICOS[publico];
-  const elegiveis = p.total - p.suprimidos;
-  const aprovados = TEMPLATES_WIZARD.filter((t) => t.status === "aprovado");
-
-  const steps = ["Público", "Template", "Revisão"];
-
-  return (
-    <div className="mx-auto max-w-3xl space-y-6 p-7">
-      {/* stepper */}
-      <div className="flex items-center gap-2">
-        {steps.map((s, i) => {
-          const n = i + 1; const done = step > n; const active = step === n;
-          return (
-            <React.Fragment key={s}>
-              <div className="flex items-center gap-2">
-                <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition-colors ${
-                  active ? "text-white" : done ? "bg-emerald-100 text-[#0F8C5A] dark:bg-emerald-500/15 dark:text-emerald-300" : "bg-zinc-100 text-zinc-400 dark:bg-zinc-800"}`}
-                  style={active ? { backgroundColor: BRAND } : undefined}>
-                  {done ? <Check className="h-4 w-4" /> : n}
-                </div>
-                <span className={`text-[13px] font-medium ${active ? "text-zinc-900 dark:text-white" : "text-zinc-400"}`}>{s}</span>
-              </div>
-              {i < steps.length - 1 && <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />}
-            </React.Fragment>
-          );
-        })}
-      </div>
-
-      {/* STEP 1 */}
-      {step === 1 && (
-        <Card className="p-6">
-          <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Quem vai receber?</h2>
-          <p className="text-[13px] text-zinc-500 dark:text-zinc-400">Escolha uma lista ou um segmento dinâmico por DDD, região ou tag.</p>
-          <div className="mt-5 space-y-2.5">
-            {Object.entries(PUBLICOS).map(([k, v]) => (
-              <label key={k} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-4 transition-colors ${publico === k ? "border-[#0F8C5A] bg-emerald-50/40 dark:bg-emerald-500/5" : "border-zinc-200 dark:border-zinc-800"}`}>
-                <input type="radio" checked={publico === k} onChange={() => setPublico(k)} className="accent-[#0F8C5A]" />
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-zinc-800 dark:text-zinc-100">{v.nome}</div>
-                  <div className="text-[12px] text-zinc-400">{v.total.toLocaleString("pt-BR")} contatos na base</div>
-                </div>
-                <div className="text-right"><div className="text-sm font-semibold text-zinc-900 dark:text-white">{(v.total - v.suprimidos).toLocaleString("pt-BR")}</div><div className="text-[11px] text-zinc-400">elegíveis</div></div>
-              </label>
-            ))}
-          </div>
-
-          <div className="mt-5 grid grid-cols-3 gap-3">
-            <div className="rounded-xl bg-zinc-50 p-4 text-center dark:bg-zinc-800/40"><div className="text-xl font-semibold text-zinc-900 dark:text-white">{p.total.toLocaleString("pt-BR")}</div><div className="text-[11px] text-zinc-500 dark:text-zinc-400">total estimado</div></div>
-            <div className="rounded-xl bg-red-50/70 p-4 text-center dark:bg-red-500/5"><div className="text-xl font-semibold text-red-600 dark:text-red-300">−{p.suprimidos}</div><div className="text-[11px] text-red-500/80 dark:text-red-300/70">suprimidos (opt-out / sem base)</div></div>
-            <div className="rounded-xl p-4 text-center text-white" style={{ backgroundColor: BRAND }}><div className="text-xl font-semibold">{elegiveis.toLocaleString("pt-BR")}</div><div className="text-[11px] opacity-90">vão receber</div></div>
-          </div>
-
-          <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-200/70 bg-amber-50/70 p-3.5 dark:border-amber-500/20 dark:bg-amber-500/5">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-            <p className="text-[12px] leading-snug text-amber-800 dark:text-amber-300">
-              <strong>{p.suprimidos} contatos sem base legal</strong> serão automaticamente suprimidos para manter a conformidade com a LGPD. Eles não entram no disparo nem na cobrança.
-            </p>
-          </div>
-        </Card>
-      )}
-
-      {/* STEP 2 */}
-      {step === 2 && (
-        <Card className="p-6">
-          <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Escolha um template aprovado</h2>
-          <p className="text-[13px] text-zinc-500 dark:text-zinc-400">Apenas templates com aprovação da Meta podem ser disparados.</p>
-          <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2">
-            <div className="space-y-2">
-              {aprovados.map((t) => (
-                <label key={t.id} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition-colors ${tplId === t.id ? "border-[#0F8C5A] bg-emerald-50/40 dark:bg-emerald-500/5" : "border-zinc-200 dark:border-zinc-800"}`}>
-                  <input type="radio" checked={tplId === t.id} onChange={() => setTplId(t.id)} className="accent-[#0F8C5A]" />
-                  <div className="flex-1"><div className="text-[13px] font-medium text-zinc-800 dark:text-zinc-100">{t.nome}</div><div className="mt-0.5"><CategoryTag cat={t.categoria} /></div></div>
-                  <BadgeCheck className="h-4 w-4 text-emerald-500" />
-                </label>
-              ))}
-              <div className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-800/40">
-                <div className="mb-2 text-[12px] font-medium text-zinc-600 dark:text-zinc-300">Variáveis</div>
-                <div className="space-y-2">
-                  <div><div className="mb-1 text-[11px] text-zinc-400">{"{{1}}"} — Nome</div><input defaultValue="Mariana" className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[13px] outline-none focus:border-[#0F8C5A] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" /></div>
-                  {tpl.corpo.includes("{{2}}") && <div><div className="mb-1 text-[11px] text-zinc-400">{"{{2}}"} — Pedido</div><input defaultValue="#48213" className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[13px] outline-none focus:border-[#0F8C5A] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" /></div>}
-                </div>
-              </div>
-            </div>
-            <div>
-              <div className="mb-2 text-[12px] font-medium text-zinc-500 dark:text-zinc-400">Prévia</div>
-              <WhatsAppBubble corpo={tpl.corpo} botoes={tpl.botoes} />
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* STEP 3 */}
-      {step === 3 && (
-        <Card className="p-6">
-          <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Revisão e disparo</h2>
-          <p className="text-[13px] text-zinc-500 dark:text-zinc-400">Confira os detalhes antes de confirmar.</p>
-          <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2">
-            <div className="space-y-3">
-              {[
-                ["Público", p.nome],
-                ["Destinatários elegíveis", elegiveis.toLocaleString("pt-BR")],
-                ["Suprimidos", `${p.suprimidos} (opt-out / sem base)`],
-                ["Template", `${tpl.nome}`],
-                ["Categoria", tpl.categoria],
-                ["País", "Brasil (+55)"],
-              ].map(([k, v]) => (
-                <div key={k} className="flex items-center justify-between border-b border-zinc-100 pb-2.5 text-[13px] last:border-0 dark:border-zinc-800">
-                  <span className="text-zinc-500 dark:text-zinc-400">{k}</span>
-                  <span className="font-medium text-zinc-800 dark:text-zinc-100">{v}</span>
-                </div>
-              ))}
-
-              <div className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
-                <div className="mb-2 text-[12px] font-medium text-zinc-500 dark:text-zinc-400">Estimativa de custo</div>
-                <div className="flex items-center justify-between text-[13px]"><span className="text-zinc-600 dark:text-zinc-300">{elegiveis.toLocaleString("pt-BR")} × R$ 0,0625 <span className="text-zinc-400">({tpl.categoria}, BR)</span></span><span className="font-semibold text-zinc-900 dark:text-white">R$ {(elegiveis * 0.0625).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                <div className="mt-2 flex items-center justify-between border-t border-zinc-100 pt-2 text-[13px] dark:border-zinc-800"><span className="font-medium text-zinc-700 dark:text-zinc-200">Total estimado</span><span className="text-base font-semibold" style={{ color: BRAND }}>R$ {(elegiveis * 0.0625).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-              </div>
-            </div>
-            <div>
-              <div className="mb-2 text-[12px] font-medium text-zinc-500 dark:text-zinc-400">Mensagem final</div>
-              <WhatsAppBubble corpo={tpl.corpo} botoes={tpl.botoes} />
-              <div className="mt-3 flex items-start gap-2 rounded-xl bg-emerald-50/70 p-3 text-[12px] text-emerald-800 dark:bg-emerald-500/5 dark:text-emerald-300">
-                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-                Todas as mensagens incluem opção de opt-out. {p.suprimidos} contatos foram suprimidos por conformidade.
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* footer nav */}
-      <div className="flex items-center justify-between">
-        <button onClick={() => (step === 1 ? setScreen("campanhas") : setStep(step - 1))}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800">
-          <ChevronLeft className="h-4 w-4" /> {step === 1 ? "Cancelar" : "Voltar"}
-        </button>
-        {step < 3 ? (
-          <PrimaryBtn onClick={() => setStep(step + 1)}>Continuar <ChevronRight className="h-4 w-4" /></PrimaryBtn>
-        ) : (
-          <PrimaryBtn onClick={() => setScreen("campanhas")}><Send className="h-4 w-4" /> Confirmar disparo · {elegiveis.toLocaleString("pt-BR")} envios</PrimaryBtn>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ----------------------------- Campanhas (lista) ----------------------------- */
-function Campanhas({ openCampaign, setScreen }) {
-  return (
-    <div className="space-y-4 p-7">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {CAMPANHAS.map((c) => {
-          const pct = c.total ? Math.round((c.enviadas / c.total) * 100) : 0;
-          return (
-            <Card key={c.id} className="cursor-pointer p-5 transition-shadow hover:shadow-md" >
-              <div onClick={() => openCampaign(c.id)}>
-                <div className="flex items-start justify-between">
-                  <StatusBadge status={c.status} />
-                  <button className="rounded-lg p-1 text-zinc-300 hover:bg-zinc-100 hover:text-zinc-500 dark:hover:bg-zinc-800"><MoreVertical className="h-4 w-4" /></button>
-                </div>
-                <h3 className="mt-3 text-[15px] font-semibold text-zinc-900 dark:text-white">{c.nome}</h3>
-                <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-zinc-400">{c.template} <CategoryTag cat={c.categoria} /></div>
-                <div className="mt-4">
-                  <div className="mb-1.5 flex items-center justify-between text-[12px]"><span className="text-zinc-500 dark:text-zinc-400">{c.enviadas.toLocaleString("pt-BR")} / {c.total.toLocaleString("pt-BR")}</span><span className="font-medium tabular-nums text-zinc-600 dark:text-zinc-300">{pct}%</span></div>
-                  <ProgressBar value={c.enviadas} total={c.total} color={c.status === "falha" ? "#ef4444" : BRAND} />
-                </div>
-                <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-                  <div><div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{c.entregues.toLocaleString("pt-BR")}</div><div className="text-[10px] text-zinc-400">entregues</div></div>
-                  <div><div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{c.lidas.toLocaleString("pt-BR")}</div><div className="text-[10px] text-zinc-400">lidas</div></div>
-                  <div><div className="text-sm font-semibold text-red-500">{c.falhas}</div><div className="text-[10px] text-zinc-400">falhas</div></div>
-                </div>
-              </div>
-            </Card>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/* ----------------------------- Campanha — detalhe ----------------------------- */
-function CampanhaDetalhe({ campaignId, setScreen }) {
-  const base = CAMPANHAS.find((c) => c.id === campaignId) || CAMPANHAS[0];
-  const [live, setLive] = useState(base);
-
-  // tempo real (somente p/ "enviando")
-  useEffect(() => {
-    if (base.status !== "enviando") return;
-    const t = setInterval(() => {
-      setLive((s) => {
-        if (s.enviadas >= s.total) return s;
-        const inc = Math.floor(Math.random() * 40) + 10;
-        const enviadas = Math.min(s.total, s.enviadas + inc);
-        return { ...s, enviadas, entregues: Math.round(enviadas * 0.96), lidas: Math.round(enviadas * 0.64), falhas: Math.round(enviadas * 0.038) };
-      });
-    }, 1400);
-    return () => clearInterval(t);
-  }, [base]);
-
-  const metrics = [
-    { k: "Enviadas", v: live.enviadas, total: live.total, color: BRAND },
-    { k: "Entregues", v: live.entregues, total: live.total, color: TEAL },
-    { k: "Lidas", v: live.lidas, total: live.total, color: "#3b82f6" },
-    { k: "Falhas", v: live.falhas, total: live.total, color: "#ef4444" },
-  ];
-
-  const timeline = [
-    { t: live.quando, label: "Campanha iniciada", desc: `${live.total.toLocaleString("pt-BR")} destinatários na fila`, icon: Send, done: true },
-    { t: "+0m12s", label: "Aquecimento do número", desc: "Envio escalonado para preservar a qualidade", icon: Zap, done: true },
-    { t: "agora", label: live.status === "enviando" ? "Enviando em tempo real" : "Envio concluído", desc: `${live.entregues.toLocaleString("pt-BR")} entregues · ${live.lidas.toLocaleString("pt-BR")} lidas`, icon: CheckCheck, done: live.status !== "enviando" },
-    { t: "—", label: "Relatório final", desc: "Disponível ao término do disparo", icon: FileText, done: false },
-  ];
-
-  return (
-    <div className="space-y-6 p-7">
-      <button onClick={() => setScreen("campanhas")} className="inline-flex items-center gap-1 text-[13px] font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100"><ChevronLeft className="h-4 w-4" /> Campanhas</button>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <div>
-          <div className="flex items-center gap-3"><h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-white">{live.nome}</h1><StatusBadge status={live.status} /></div>
-          <p className="mt-0.5 text-[13px] text-zinc-500 dark:text-zinc-400">{live.template} · <CategoryTag cat={live.categoria} /> · iniciada {live.quando}</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {metrics.map((m) => (
-          <Card key={m.k} className="p-5">
-            <div className="text-[13px] text-zinc-500 dark:text-zinc-400">{m.k}</div>
-            <div className="mt-1 text-2xl font-semibold tabular-nums tracking-tight" style={{ color: m.color }}>{m.v.toLocaleString("pt-BR")}</div>
-            <div className="mt-3"><ProgressBar value={m.v} total={m.total} color={m.color} /></div>
-            <div className="mt-1.5 text-[11px] text-zinc-400">{Math.round((m.v / m.total) * 100)}% do total</div>
-          </Card>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="p-5 lg:col-span-2">
-          <h2 className="mb-4 text-sm font-semibold text-zinc-900 dark:text-white">Timeline</h2>
-          <div className="space-y-1">
-            {timeline.map((item, i) => {
-              const I = item.icon;
-              return (
-                <div key={i} className="flex gap-3">
-                  <div className="flex flex-col items-center">
-                    <div className={`flex h-8 w-8 items-center justify-center rounded-full ${item.done ? "text-white" : "bg-zinc-100 text-zinc-400 dark:bg-zinc-800"}`} style={item.done ? { backgroundColor: BRAND } : undefined}><I className="h-4 w-4" /></div>
-                    {i < timeline.length - 1 && <div className="my-1 w-px flex-1 bg-zinc-200 dark:bg-zinc-800" />}
-                  </div>
-                  <div className="pb-5">
-                    <div className="flex items-center gap-2"><span className="text-[13px] font-medium text-zinc-800 dark:text-zinc-100">{item.label}</span><span className="text-[11px] text-zinc-400">{item.t}</span></div>
-                    <p className="text-[12px] text-zinc-500 dark:text-zinc-400">{item.desc}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-
-        <Card className="p-5">
-          <h2 className="mb-4 text-sm font-semibold text-zinc-900 dark:text-white">Conformidade</h2>
-          <div className="space-y-3 text-[13px]">
-            <div className="flex items-center justify-between"><span className="text-zinc-500 dark:text-zinc-400">Base legal</span><span className="font-medium text-zinc-800 dark:text-zinc-100">Consentimento</span></div>
-            <div className="flex items-center justify-between"><span className="text-zinc-500 dark:text-zinc-400">Suprimidos (opt-out)</span><span className="font-medium text-zinc-800 dark:text-zinc-100">96</span></div>
-            <div className="flex items-center justify-between"><span className="text-zinc-500 dark:text-zinc-400">Opt-out na mensagem</span><span className="inline-flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400"><Check className="h-3.5 w-3.5" /> Incluído</span></div>
-            <div className="mt-2 flex items-start gap-2 rounded-xl bg-emerald-50/70 p-3 text-[12px] text-emerald-800 dark:bg-emerald-500/5 dark:text-emerald-300"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" /> Disparo em conformidade com a LGPD. <a href="#" className="underline">Ver política</a></div>
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-}
+/* Campanhas, NovaCampanha e CampanhaDetalhe foram movidos para ./screens/Campanhas.jsx */
 
 /* Templates foram movidos para ./screens/Templates.jsx */
 
@@ -613,7 +302,7 @@ function AppShell() {
           <main className="flex-1 overflow-y-auto">
             {screen === "dashboard" && <Dashboard setScreen={setScreen} openCampaign={openCampaign} />}
             {screen === "contatos" && <Contatos openImport={() => setImportOpen(true)} reloadKey={contactsReload} />}
-            {screen === "nova" && <NovaCampanha setScreen={setScreen} />}
+            {screen === "nova" && <NovaCampanha setScreen={setScreen} openCampaign={openCampaign} />}
             {screen === "campanhas" && <Campanhas openCampaign={openCampaign} setScreen={setScreen} />}
             {screen === "campanha-detalhe" && <CampanhaDetalhe campaignId={campaignId} setScreen={setScreen} />}
             {screen === "templates" && <Templates />}
