@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
+import { QueryCampaignsDto } from './dto/query-campaigns.dto';
 
 // Tarifas placeholder (centavos) por categoria. TODO: substituir pela tabela
 // oficial da Meta por categoria + código de país do destinatário.
@@ -80,6 +81,45 @@ export class CampaignsService {
       costEstimateCents: Number(costEstimate),
       status: dto.scheduledAt ? 'scheduled' : 'sending',
     };
+  }
+
+  async list(orgId: string, q: QueryCampaignsDto) {
+    const page = q.page ?? 1;
+    const pageSize = Math.min(q.pageSize ?? 20, 100);
+    const where: any = { organizationId: orgId };
+    if (q.status) where.status = q.status;
+
+    const [rows, total] = await Promise.all([
+      this.prisma.campaign.findMany({
+        where,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          template: { select: { name: true, category: true } },
+          channel: { select: { label: true } },
+        },
+      }),
+      this.prisma.campaign.count({ where }),
+    ]);
+
+    const items = rows.map((c) => ({
+      id: c.id,
+      name: c.name,
+      status: c.status,
+      template: c.template,
+      channel: c.channel,
+      totalRecipients: c.totalRecipients,
+      suppressedCount: c.suppressedCount,
+      sentCount: c.sentCount,
+      deliveredCount: c.deliveredCount,
+      readCount: c.readCount,
+      failedCount: c.failedCount,
+      costEstimateCents: c.costEstimateCents != null ? Number(c.costEstimateCents) : null,
+      scheduledAt: c.scheduledAt,
+      createdAt: c.createdAt,
+    }));
+    return { items, total, page, pageSize };
   }
 
   async progress(orgId: string, id: string) {

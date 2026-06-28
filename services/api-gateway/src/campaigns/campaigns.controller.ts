@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CampaignsService } from './campaigns.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
+import { QueryCampaignsDto } from './dto/query-campaigns.dto';
 
 @Controller('campaigns')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -19,6 +20,11 @@ export class CampaignsController {
     @Body() dto: CreateCampaignDto,
   ) {
     return this.campaigns.create(orgId, userId, dto);
+  }
+
+  @Get()
+  list(@CurrentUser('organizationId') orgId: string, @Query() q: QueryCampaignsDto) {
+    return this.campaigns.list(orgId, q);
   }
 
   @Get(':id')
