@@ -21,10 +21,10 @@ model Organization {
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  users    User[]
-  contacts Contact[]
-  channels WhatsappChannel[]
-  lists    List[]
+  users     User[]
+  contacts  Contact[]
+  channels  WhatsappChannel[]
+  lists     List[]
   templates Template[]
   campaigns Campaign[]
 
@@ -75,6 +75,7 @@ model WhatsappChannel {
   updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaigns    Campaign[]
 
   @@unique([organizationId, phoneNumberId])
   @@map("whatsapp_channels")
@@ -134,6 +135,7 @@ model Template {
   updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaigns    Campaign[]
 
   @@unique([organizationId, name, language])
   @@map("templates")
@@ -161,7 +163,9 @@ model Campaign {
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  channel      WhatsappChannel @relation(fields: [channelId], references: [id])
+  template     Template?       @relation(fields: [templateId], references: [id])
 
   @@map("campaigns")
 }
