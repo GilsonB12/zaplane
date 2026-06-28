@@ -11,6 +11,8 @@ import {
   BRAND, BRAND_DARK, TEAL, Card, StatusBadge, ConsentChip, TplStatusBadge,
   CategoryTag, ProgressBar, WhatsAppBubble, PrimaryBtn, Topbar, Sidebar, NAV,
 } from "./components/ui.jsx";
+import { AuthProvider, useAuth } from "./auth/AuthContext.jsx";
+import Login from "./screens/Login.jsx";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
 } from "recharts";
@@ -793,7 +795,8 @@ const TITLES = {
   config: ["Configurações", "Conexão, equipe e billing"],
 };
 
-export default function Zaplane() {
+function AppShell() {
+  const { logout } = useAuth();
   const [screen, setScreen] = useState("dashboard");
   const [dark, setDark] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -812,7 +815,7 @@ export default function Zaplane() {
       <div className="flex h-screen overflow-hidden bg-zinc-50 font-sans text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
         <Sidebar screen={screen} setScreen={(s) => { setScreen(s); }} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <Topbar title={title} subtitle={subtitle} dark={dark} setDark={setDark} actions={topActions} />
+          <Topbar title={title} subtitle={subtitle} dark={dark} setDark={setDark} actions={topActions} onLogout={logout} />
           <main className="flex-1 overflow-y-auto">
             {screen === "dashboard" && <Dashboard setScreen={setScreen} openCampaign={openCampaign} />}
             {screen === "contatos" && <Contatos openImport={() => setImportOpen(true)} />}
@@ -826,5 +829,18 @@ export default function Zaplane() {
         {importOpen && <ImportModal onClose={() => setImportOpen(false)} />}
       </div>
     </div>
+  );
+}
+
+function Gate() {
+  const { authed } = useAuth();
+  return authed ? <AppShell /> : <Login />;
+}
+
+export default function Zaplane() {
+  return (
+    <AuthProvider>
+      <Gate />
+    </AuthProvider>
   );
 }

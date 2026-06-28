@@ -1,7 +1,7 @@
 import React from "react";
 import {
   CheckCheck, BadgeCheck, Clock, XCircle, Zap, ShieldCheck, Sun, Moon,
-  LayoutDashboard, Users, Send, Megaphone, LayoutTemplate, Settings,
+  LayoutDashboard, Users, Send, Megaphone, LayoutTemplate, Settings, LogOut,
 } from "lucide-react";
 
 /* ----------------------------- Tokens de cor ----------------------------- */
@@ -171,7 +171,7 @@ export function Sidebar({ screen, setScreen }) {
 }
 
 /* ----------------------------- Topbar ----------------------------- */
-export function Topbar({ title, subtitle, dark, setDark, actions }) {
+export function Topbar({ title, subtitle, dark, setDark, actions, onLogout }) {
   return (
     <header className="sticky top-0 z-20 flex items-center gap-4 border-b border-zinc-200 bg-white/80 px-7 py-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/80">
       <div className="min-w-0">
@@ -191,6 +191,12 @@ export function Topbar({ title, subtitle, dark, setDark, actions }) {
             <div className="text-[10px] text-zinc-400">Owner</div>
           </div>
         </div>
+        {onLogout && (
+          <button onClick={onLogout} title="Sair"
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800">
+            <LogOut className="h-[18px] w-[18px]" />
+          </button>
+        )}
       </div>
     </header>
   );
