@@ -103,7 +103,7 @@ function readToken(enc: string): string {
   try { return decrypt(enc); } catch { return enc; }
 }
 
-// placeholders do seed/dev não são credenciais reais
+// placeholders do seed/dev não são credenciais reais (AQUI = seed; LOCAL_DEV = canal de org recém-registrada)
 function looksConfigured(v?: string | null): boolean {
-  return !!v && !v.includes('AQUI');
+  return !!v && !v.includes('AQUI') && !v.includes('LOCAL_DEV');
 }
