@@ -309,6 +309,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
                 {tpl && (
                   <div className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-800/40">
                     <div className="mb-2 text-[12px] font-medium text-zinc-600 dark:text-zinc-300">Variáveis</div>
+                    {/* TODO (Fatia 2): ligar estes campos a templateParams */}
                     <div className="space-y-2">
                       <div>
                         <div className="mb-1 text-[11px] text-zinc-400">{"{{1}}"} — Nome</div>
@@ -523,23 +524,30 @@ export function CampanhaDetalhe({ campaignId, setScreen }) {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={reload}
-            disabled={loading}
-            className="rounded-xl border border-zinc-200 px-3.5 py-2 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 disabled:opacity-50"
-          >
-            {loading ? "Atualizando…" : "Atualizar"}
-          </button>
-
-          {live?.status === "enviando" && (
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-2">
             <button
-              onClick={onCancel}
-              disabled={cancel.pending}
-              className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2 text-[13px] font-medium text-red-700 hover:bg-red-100 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-300 dark:hover:bg-red-500/10 disabled:opacity-50"
+              onClick={reload}
+              disabled={loading}
+              className="rounded-xl border border-zinc-200 px-3.5 py-2 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 disabled:opacity-50"
             >
-              {cancel.pending ? "Cancelando…" : "Cancelar"}
+              {loading ? "Atualizando…" : "Atualizar"}
             </button>
+
+            {live?.status === "enviando" && (
+              <button
+                onClick={onCancel}
+                disabled={cancel.pending}
+                className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2 text-[13px] font-medium text-red-700 hover:bg-red-100 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-300 dark:hover:bg-red-500/10 disabled:opacity-50"
+              >
+                {cancel.pending ? "Cancelando…" : "Cancelar"}
+              </button>
+            )}
+          </div>
+          {cancel.error && (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-[12px] text-red-700 dark:bg-red-500/10 dark:text-red-300">
+              {cancel.error.message}
+            </div>
           )}
         </div>
       </div>

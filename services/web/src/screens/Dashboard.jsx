@@ -1,9 +1,9 @@
 import React from "react";
 import {
   Users, CheckCheck, ShieldCheck, Send,
-  ArrowUpRight, ArrowDownRight, ChevronRight, BadgeCheck,
+  ChevronRight,
 } from "lucide-react";
-import { BRAND, TEAL, Card, ProgressBar } from "../components/ui.jsx";
+import { TEAL, Card, ProgressBar } from "../components/ui.jsx";
 import { useResource } from "../hooks/useResource.js";
 import { toUiCampaign } from "../api/adapters.js";
 import { listContacts, listCampaigns } from "../api/endpoints.js";

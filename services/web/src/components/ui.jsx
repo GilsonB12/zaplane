@@ -203,12 +203,12 @@ export function Topbar({ title, subtitle, dark, setDark, actions, onLogout }) {
 }
 
 /* ----------------------------- PrimaryBtn ----------------------------- */
-export function PrimaryBtn({ children, onClick, className = "" }) {
+export function PrimaryBtn({ children, onClick, className = "", disabled = false }) {
   return (
-    <button onClick={onClick}
-      className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition-colors ${className}`}
+    <button onClick={onClick} disabled={disabled}
+      className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${className}`}
       style={{ backgroundColor: BRAND }}
-      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = BRAND_DARK)}
+      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.backgroundColor = BRAND_DARK; }}
       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = BRAND)}>
       {children}
     </button>

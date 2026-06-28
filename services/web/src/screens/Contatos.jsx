@@ -96,9 +96,13 @@ export function ImportModal({ onClose, onImported }) {
   async function onSubmit() {
     const file = fileRef.current?.files?.[0];
     if (!file) return;
-    const r = await imp.run(file);
-    setResult(r); // { imported, duplicates, invalid, total }
-    if (onImported) onImported();
+    try {
+      const r = await imp.run(file);
+      setResult(r); // { imported, duplicates, invalid, total }
+      if (onImported) onImported();
+    } catch {
+      /* erro já exibido via imp.error */
+    }
   }
 
   return (
