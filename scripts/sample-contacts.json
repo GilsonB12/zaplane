@@ -1,0 +1,6 @@
+{
+  "contacts": [
+    { "nome": "Bruno Alves", "whatsapp": "85 98888-0001", "origem": "site" },
+    { "nome": "Daniela Rocha", "celular": "+55 41 99777-0002", "origem": "loja" }
+  ]
+}

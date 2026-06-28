@@ -1,0 +1,30 @@
+# Node
+node_modules/
+dist/
+*.log
+.env
+.env.local
+# Prisma
+services/api-gateway/prisma/*.db
+# Go
+services/dispatcher/bin/
+services/dispatcher/dispatcher
+# Python
+__pycache__/
+*.pyc
+.venv/
+services/importer/.venv/
+# OS / editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+# Segredos / uploads
+*.pem
+uploads_tmp/
+
+# FUSE leftovers
+.fuse_hidden*
+
+# Superpowers SDD scratch (ledger / diffs) — não versionar
+.superpowers/

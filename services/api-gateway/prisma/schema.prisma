@@ -1,0 +1,207 @@
+// Prisma reflete o schema SQL (db/migrations/001_init.sql).
+// Fluxo recomendado: aplique o SQL e rode `npx prisma db pull` para ressincronizar,
+// depois `npx prisma generate`. Este arquivo já vem preenchido para gerar o client.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String
+  slug              String   @unique
+  plan              String   @default("free")
+  dailyMessageLimit Int      @default(1000) @map("daily_message_limit")
+  status            String   @default("active")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  users    User[]
+  contacts Contact[]
+  channels WhatsappChannel[]
+  lists    List[]
+  templates Template[]
+  campaigns Campaign[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  email          String
+  passwordHash   String    @map("password_hash")
+  name           String?
+  role           String    @default("operator")
+  status         String    @default("active")
+  lastLoginAt    DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("refresh_tokens")
+}
+
+model WhatsappChannel {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  label           String
+  phoneNumberId   String   @map("phone_number_id")
+  wabaId          String   @map("waba_id")
+  displayNumber   String?  @map("display_number")
+  accessTokenEnc  String   @map("access_token_enc")
+  qualityRating   String?  @map("quality_rating")
+  throughputLimit Int      @default(80) @map("throughput_limit")
+  status          String   @default("active")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, phoneNumberId])
+  @@map("whatsapp_channels")
+}
+
+model Contact {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  phoneE164      String    @map("phone_e164")
+  phoneHash      String    @map("phone_hash")
+  name           String?
+  countryCode    String?   @default("BR") @map("country_code")
+  ddd            String?
+  region         String?
+  tags           String[]
+  attributes     Json      @default("{}")
+  consentStatus  String    @default("unknown") @map("consent_status")
+  consentSource  String?   @map("consent_source")
+  consentAt      DateTime? @map("consent_at") @db.Timestamptz(6)
+  optedOut       Boolean   @default(false) @map("opted_out")
+  optedOutAt     DateTime? @map("opted_out_at") @db.Timestamptz(6)
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, phoneHash])
+  @@map("contacts")
+}
+
+model List {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String
+  type           String   @default("static")
+  rule           Json?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("lists")
+}
+
+model Template {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String
+  language       String   @default("pt_BR")
+  category       String
+  status         String   @default("PENDING")
+  body           String?
+  variablesCount Int      @default(0) @map("variables_count")
+  metaTemplateId String?  @map("meta_template_id")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name, language])
+  @@map("templates")
+}
+
+model Campaign {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId    String    @map("organization_id") @db.Uuid
+  channelId         String    @map("channel_id") @db.Uuid
+  templateId        String?   @map("template_id") @db.Uuid
+  name              String
+  listId            String?   @map("list_id") @db.Uuid
+  audienceRule      Json?     @map("audience_rule")
+  templateParams    Json      @default("{}") @map("template_params")
+  status            String    @default("draft")
+  scheduledAt       DateTime? @map("scheduled_at") @db.Timestamptz(6)
+  totalRecipients   Int       @default(0) @map("total_recipients")
+  suppressedCount   Int       @default(0) @map("suppressed_count")
+  sentCount         Int       @default(0) @map("sent_count")
+  deliveredCount    Int       @default(0) @map("delivered_count")
+  readCount         Int       @default(0) @map("read_count")
+  failedCount       Int       @default(0) @map("failed_count")
+  costEstimateCents BigInt?   @map("cost_estimate_cents")
+  createdBy         String?   @map("created_by") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("campaigns")
+}
+
+model OutboundMessage {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  campaignId     String?   @map("campaign_id") @db.Uuid
+  channelId      String    @map("channel_id") @db.Uuid
+  contactId      String?   @map("contact_id") @db.Uuid
+  toPhoneE164    String    @map("to_phone_e164")
+  payload        Json
+  status         String    @default("queued")
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(5) @map("max_attempts")
+  nextAttemptAt  DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  lockedAt       DateTime? @map("locked_at") @db.Timestamptz(6)
+  lockedBy       String?   @map("locked_by")
+  waMessageId    String?   @map("wa_message_id")
+  errorCode      String?   @map("error_code")
+  errorDetail    String?   @map("error_detail")
+  sentAt         DateTime? @map("sent_at") @db.Timestamptz(6)
+  deliveredAt    DateTime? @map("delivered_at") @db.Timestamptz(6)
+  readAt         DateTime? @map("read_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("outbound_messages")
+}
+
+model DataSubjectRequest {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  type           String
+  subjectPhone   String    @map("subject_phone")
+  status         String    @default("pending")
+  resultUri      String?   @map("result_uri")
+  requestedBy    String?   @map("requested_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  @@map("data_subject_requests")
+}
