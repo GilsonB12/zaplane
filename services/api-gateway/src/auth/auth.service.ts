@@ -39,6 +39,18 @@ export class AuthService {
           role: 'owner',
         },
       });
+      // cria canal placeholder para que a org possa enfileirar localmente
+      // sem credenciais reais da Meta (dispensado por looksConfigured)
+      await tx.whatsappChannel.create({
+        data: {
+          organizationId: org.id,
+          label: 'Canal padrão',
+          phoneNumberId: 'LOCAL_DEV',
+          wabaId: 'LOCAL_DEV',
+          accessTokenEnc: 'LOCAL_DEV',
+          status: 'active',
+        },
+      });
       return { org, user };
     });
 

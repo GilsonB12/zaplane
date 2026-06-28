@@ -16,8 +16,11 @@ export class CampaignsService {
   constructor(private prisma: PrismaService) {}
 
   async create(orgId: string, userId: string, dto: CreateCampaignDto) {
+    // fallback: usa o canal ativo do org quando channelId não é informado
     const channel = await this.prisma.whatsappChannel.findFirst({
-      where: { id: dto.channelId, organizationId: orgId, status: 'active' },
+      where: dto.channelId
+        ? { id: dto.channelId, organizationId: orgId, status: 'active' }
+        : { organizationId: orgId, status: 'active' },
     });
     if (!channel) throw new NotFoundException('Canal WhatsApp não encontrado.');
 
@@ -45,7 +48,7 @@ export class CampaignsService {
     const costEstimate = BigInt(eligible.length * (RATE_CENTS[template.category] ?? 0));
     const campaign = await this.prisma.campaign.create({
       data: {
-        organizationId: orgId, channelId: dto.channelId, templateId: dto.templateId,
+        organizationId: orgId, channelId: channel.id, templateId: dto.templateId,
         name: dto.name, listId: dto.listId ?? null,
         audienceRule: (dto.audienceRule as any) ?? undefined,
         templateParams: (dto.templateParams as any) ?? {},
@@ -61,7 +64,7 @@ export class CampaignsService {
       const rows = eligible.map((c) => ({
         organizationId: orgId,
         campaignId: campaign.id,
-        channelId: dto.channelId,
+        channelId: channel.id,
         contactId: c.id,
         toPhoneE164: c.phoneE164,
         payload: this.buildTemplatePayload(c, template, dto.templateParams),

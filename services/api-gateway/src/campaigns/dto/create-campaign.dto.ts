@@ -10,8 +10,8 @@ export class CreateCampaignDto {
   @IsString() @MinLength(2)
   name!: string;
 
-  @IsUUID()
-  channelId!: string;
+  @IsOptional() @IsUUID()
+  channelId?: string;
 
   @IsUUID()
   templateId!: string;
