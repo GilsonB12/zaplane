@@ -36,13 +36,20 @@ export function importContacts(file, consentStatus, consentSource, defaultCountr
 /* ---- Listas / Templates ---- */
 export const listLists = () => api.get("/lists");
 export const listTemplates = () => api.get("/templates");
+export const createTemplate = (dto) => api.post("/templates", dto);
 
 /* ---- Campanhas ---- */
 export const createCampaign = (dto) => api.post("/campaigns", dto);
 export const getCampaign = (id) => api.get(`/campaigns/${id}`);
 export const cancelCampaign = (id) => api.post(`/campaigns/${id}/cancel`);
-// NOTA: o gateway ainda não tem "GET /campaigns" (listar todas). Ver web/README.md.
+export const listCampaigns = (query = {}) => {
+  const qs = new URLSearchParams(query).toString();
+  return api.get(`/campaigns${qs ? `?${qs}` : ""}`);
+};
 
 /* ---- Envio avulso / Privacidade (LGPD) ---- */
 export const sendSingle = (dto) => api.post("/messages/send", dto);
 export const createDataRequest = (dto) => api.post("/privacy/data-requests", dto);
+
+/* ---- Sessão ---- */
+export function logout() { setToken(null); }
