@@ -85,7 +85,7 @@ export class ContactsService {
    */
   async importFile(orgId: string, file: Express.Multer.File, dto: ImportContactsDto) {
     const form = new FormData();
-    form.append('file', new Blob([file.buffer]), file.originalname);
+    form.append('file', new Blob([new Uint8Array(file.buffer)]), file.originalname);
     form.append('default_country', dto.defaultCountry ?? 'BR');
 
     const importerUrl = this.config.get<string>('importerUrl');
