@@ -123,11 +123,29 @@ export class CampaignsService {
   }
 
   async progress(orgId: string, id: string) {
-    const c = await this.prisma.campaign.findFirst({ where: { id, organizationId: orgId } });
+    const c = await this.prisma.campaign.findFirst({
+      where: { id, organizationId: orgId },
+      include: {
+        template: { select: { name: true, category: true } },
+        channel: { select: { label: true } },
+      },
+    });
     if (!c) throw new NotFoundException('Campanha não encontrada.');
     return {
-      id: c.id, status: c.status, total: c.totalRecipients, suppressed: c.suppressedCount,
-      sent: c.sentCount, delivered: c.deliveredCount, read: c.readCount, failed: c.failedCount,
+      id: c.id,
+      name: c.name,
+      status: c.status,
+      template: c.template,
+      channel: c.channel,
+      total: c.totalRecipients,
+      suppressed: c.suppressedCount,
+      sent: c.sentCount,
+      delivered: c.deliveredCount,
+      read: c.readCount,
+      failed: c.failedCount,
+      costEstimateCents: c.costEstimateCents != null ? Number(c.costEstimateCents) : null,
+      createdAt: c.createdAt,
+      scheduledAt: c.scheduledAt,
     };
   }
 
