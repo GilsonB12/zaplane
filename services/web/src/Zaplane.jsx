@@ -1,18 +1,19 @@
 import React, { useState, useEffect } from "react";
 import {
-  Search, Plus, Upload, MoreVertical, Edit2, Trash2, MessageSquare,
-  Check, Send, X, ChevronRight, ChevronLeft,
+  Plus, MoreVertical,
+  Check, Send, ChevronRight, ChevronLeft,
   Users, CheckCheck, ShieldCheck, BadgeCheck, Zap,
   AlertTriangle, Phone, CreditCard, UserCog,
-  Filter, FileText, Info, ArrowUpRight, ArrowDownRight, CircleDot,
-  Star, FileSpreadsheet, FileJson, ChevronDown,
+  FileText, Info, ArrowUpRight, ArrowDownRight, CircleDot,
+  Star,
 } from "lucide-react";
 import {
-  BRAND, BRAND_DARK, TEAL, Card, StatusBadge, ConsentChip, TplStatusBadge,
-  CategoryTag, ProgressBar, WhatsAppBubble, PrimaryBtn, Topbar, Sidebar, NAV,
+  BRAND, TEAL, Card, StatusBadge, TplStatusBadge,
+  CategoryTag, ProgressBar, WhatsAppBubble, PrimaryBtn, Topbar, Sidebar,
 } from "./components/ui.jsx";
 import { AuthProvider, useAuth } from "./auth/AuthContext.jsx";
 import Login from "./screens/Login.jsx";
+import Contatos, { ImportModal } from "./screens/Contatos.jsx";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
 } from "recharts";
@@ -48,18 +49,6 @@ const CAMPANHAS = [
     total: 640, enviadas: 410, entregues: 120, lidas: 0, falhas: 290, categoria: "Authentication", quando: "22/06, 11:05" },
 ];
 
-const CONTATOS = [
-  { id: 1, nome: "Mariana Alves", tel: "+55 11 98123-4477", ddd: "11", regiao: "Sudeste", tag: "Cliente VIP", consent: "consentido" },
-  { id: 2, nome: "Bruno Carvalho", tel: "+55 21 99654-1209", ddd: "21", regiao: "Sudeste", tag: "Lead", consent: "pendente" },
-  { id: 3, nome: "Carla Menezes", tel: "+55 71 98877-3321", ddd: "71", regiao: "Nordeste", tag: "Cliente VIP", consent: "consentido" },
-  { id: 4, nome: "Diego Fontes", tel: "+55 51 99123-8890", ddd: "51", regiao: "Sul", tag: "Newsletter", consent: "optout" },
-  { id: 5, nome: "Eduarda Lima", tel: "+55 85 98456-1122", ddd: "85", regiao: "Nordeste", tag: "Lead", consent: "consentido" },
-  { id: 6, nome: "Felipe Souza", tel: "+55 41 99765-0099", ddd: "41", regiao: "Sul", tag: "Cliente", consent: "pendente" },
-  { id: 7, nome: "Gabriela Pinto", tel: "+55 62 98321-7766", ddd: "62", regiao: "Centro-Oeste", tag: "Cliente", consent: "consentido" },
-  { id: 8, nome: "Henrique Dias", tel: "+55 11 99888-1234", ddd: "11", regiao: "Sudeste", tag: "Newsletter", consent: "consentido" },
-  { id: 9, nome: "Isabela Rocha", tel: "+55 92 98112-4567", ddd: "92", regiao: "Norte", tag: "Lead", consent: "optout" },
-  { id: 10, nome: "João Marques", tel: "+55 31 99543-8821", ddd: "31", regiao: "Sudeste", tag: "Cliente VIP", consent: "consentido" },
-];
 
 const TEMPLATES = [
   { id: "t1", nome: "bf_aquecimento_v2", categoria: "Marketing", status: "aprovado", idioma: "pt_BR",
@@ -196,172 +185,7 @@ function Dashboard({ setScreen, openCampaign }) {
   );
 }
 
-/* ----------------------------- Contatos ----------------------------- */
-function Contatos({ openImport }) {
-  const [q, setQ] = useState("");
-  const [regiao, setRegiao] = useState("");
-  const [tag, setTag] = useState("");
-  const [consent, setConsent] = useState("");
-
-  const regioes = [...new Set(CONTATOS.map((c) => c.regiao))];
-  const tags = [...new Set(CONTATOS.map((c) => c.tag))];
-
-  const filtrados = CONTATOS.filter((c) =>
-    (!q || c.nome.toLowerCase().includes(q.toLowerCase()) || c.tel.includes(q) || c.ddd.includes(q)) &&
-    (!regiao || c.regiao === regiao) && (!tag || c.tag === tag) && (!consent || c.consent === consent));
-
-  const sel = (v, set, opts, ph) => (
-    <div className="relative">
-      <select value={v} onChange={(e) => set(e.target.value)}
-        className="appearance-none rounded-xl border border-zinc-200 bg-white py-2 pl-3 pr-8 text-sm text-zinc-600 outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-        <option value="">{ph}</option>
-        {opts.map((o) => <option key={o} value={o}>{o}</option>)}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-    </div>
-  );
-
-  return (
-    <div className="space-y-4 p-7">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative min-w-[240px] flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por nome, telefone ou DDD…"
-            className="w-full rounded-xl border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none placeholder:text-zinc-400 focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100" />
-        </div>
-        <div className="flex items-center gap-1.5 text-zinc-400"><Filter className="h-4 w-4" /></div>
-        {sel(regiao, setRegiao, regioes, "Região / DDD")}
-        {sel(tag, setTag, tags, "Tag")}
-        {sel(consent, setConsent, ["consentido", "pendente", "optout"].map((x) => x), "Consentimento")}
-        <div className="ml-auto" />
-        <PrimaryBtn onClick={openImport}><Upload className="h-4 w-4" /> Importar contatos</PrimaryBtn>
-      </div>
-
-      <Card className="overflow-hidden">
-        <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-3 text-[13px] dark:border-zinc-800">
-          <span className="text-zinc-500 dark:text-zinc-400"><span className="font-semibold text-zinc-700 dark:text-zinc-200">{filtrados.length}</span> contatos</span>
-          <span className="inline-flex items-center gap-1.5 text-zinc-400"><ShieldCheck className="h-3.5 w-3.5 text-[#0F8C5A]" /> Suprimidos por opt-out são ocultados de disparos automaticamente</span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-100 bg-zinc-50/60 text-left text-[11px] uppercase tracking-wide text-zinc-400 dark:border-zinc-800 dark:bg-zinc-800/40">
-                <th className="px-5 py-2.5 font-medium">Contato</th>
-                <th className="px-3 py-2.5 font-medium">DDD / Região</th>
-                <th className="px-3 py-2.5 font-medium">Tag</th>
-                <th className="px-3 py-2.5 font-medium">Consentimento</th>
-                <th className="px-5 py-2.5 text-right font-medium">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtrados.map((c) => (
-                <tr key={c.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50/80 dark:border-zinc-800/60 dark:hover:bg-zinc-800/30">
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300">{c.nome.split(" ").map((n) => n[0]).slice(0, 2).join("")}</div>
-                      <div><div className="font-medium text-zinc-800 dark:text-zinc-100">{c.nome}</div><div className="text-[12px] tabular-nums text-zinc-400">{c.tel}</div></div>
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 text-zinc-600 dark:text-zinc-300">DDD {c.ddd} · <span className="text-zinc-400">{c.regiao}</span></td>
-                  <td className="px-3 py-3"><span className="rounded-md bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{c.tag}</span></td>
-                  <td className="px-3 py-3"><ConsentChip consent={c.consent} /></td>
-                  <td className="px-5 py-3">
-                    <div className="flex items-center justify-end gap-1">
-                      <button title="Enviar mensagem" disabled={c.consent === "optout"} className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-[#0F8C5A] disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-zinc-800"><MessageSquare className="h-4 w-4" /></button>
-                      <button title="Editar" className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"><Edit2 className="h-4 w-4" /></button>
-                      <button title="Remover" className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filtrados.length === 0 && (
-                <tr><td colSpan={5} className="px-5 py-12 text-center text-sm text-zinc-400">Nenhum contato encontrado com esses filtros.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-/* ----------------------------- Import modal ----------------------------- */
-function ImportModal({ onClose }) {
-  const [base, setBase] = useState("consentimento");
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-xl rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
-          <div>
-            <h3 className="text-base font-semibold text-zinc-900 dark:text-white">Importar contatos</h3>
-            <p className="text-[13px] text-zinc-500 dark:text-zinc-400">Arquivos CSV, JSON ou XLSX até 20 MB</p>
-          </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X className="h-5 w-5" /></button>
-        </div>
-
-        <div className="space-y-5 p-6">
-          <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-9 text-center dark:border-zinc-700 dark:bg-zinc-800/30">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-[#0F8C5A] dark:bg-emerald-500/10 dark:text-emerald-300"><Upload className="h-6 w-6" /></div>
-            <p className="mt-3 text-sm font-medium text-zinc-700 dark:text-zinc-200">Arraste o arquivo aqui ou <span className="text-[#0F8C5A] dark:text-emerald-300">selecione</span></p>
-            <div className="mt-3 flex items-center gap-2 text-[11px] text-zinc-400">
-              <span className="inline-flex items-center gap-1"><FileSpreadsheet className="h-3.5 w-3.5" /> CSV</span>
-              <span className="inline-flex items-center gap-1"><FileJson className="h-3.5 w-3.5" /> JSON</span>
-              <span className="inline-flex items-center gap-1"><FileSpreadsheet className="h-3.5 w-3.5" /> XLSX</span>
-            </div>
-          </div>
-
-          {/* validation preview */}
-          <div>
-            <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-zinc-700 dark:text-zinc-200">
-              <FileSpreadsheet className="h-4 w-4 text-zinc-400" /> contatos_junho.csv <span className="text-zinc-400">· 2.481 linhas</span>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="rounded-xl border border-emerald-200/60 bg-emerald-50/60 p-3 dark:border-emerald-500/20 dark:bg-emerald-500/5">
-                <div className="text-lg font-semibold text-emerald-700 dark:text-emerald-300">2.318</div>
-                <div className="text-[11px] text-emerald-700/70 dark:text-emerald-300/70">válidos</div>
-              </div>
-              <div className="rounded-xl border border-amber-200/60 bg-amber-50/60 p-3 dark:border-amber-500/20 dark:bg-amber-500/5">
-                <div className="text-lg font-semibold text-amber-700 dark:text-amber-300">142</div>
-                <div className="text-[11px] text-amber-700/70 dark:text-amber-300/70">duplicados</div>
-              </div>
-              <div className="rounded-xl border border-red-200/60 bg-red-50/60 p-3 dark:border-red-500/20 dark:bg-red-500/5">
-                <div className="text-lg font-semibold text-red-700 dark:text-red-300">21</div>
-                <div className="text-[11px] text-red-700/70 dark:text-red-300/70">inválidos</div>
-              </div>
-            </div>
-          </div>
-
-          {/* base legal */}
-          <div>
-            <label className="mb-2 flex items-center gap-1.5 text-[13px] font-medium text-zinc-700 dark:text-zinc-200">
-              <ShieldCheck className="h-4 w-4 text-[#0F8C5A]" /> Base legal / consentimento (LGPD)
-            </label>
-            <div className="grid grid-cols-1 gap-2">
-              {[
-                { v: "consentimento", t: "Consentimento explícito", d: "O titular autorizou o recebimento (opt-in)." },
-                { v: "legitimo", t: "Legítimo interesse", d: "Relação comercial existente, com opt-out disponível." },
-                { v: "contrato", t: "Execução de contrato", d: "Mensagens transacionais de um serviço contratado." },
-              ].map((o) => (
-                <label key={o.v} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${base === o.v ? "border-[#0F8C5A] bg-emerald-50/50 dark:bg-emerald-500/5" : "border-zinc-200 dark:border-zinc-800"}`}>
-                  <input type="radio" name="base" checked={base === o.v} onChange={() => setBase(o.v)} className="mt-0.5 accent-[#0F8C5A]" />
-                  <div><div className="text-[13px] font-medium text-zinc-800 dark:text-zinc-100">{o.t}</div><div className="text-[12px] text-zinc-500 dark:text-zinc-400">{o.d}</div></div>
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between gap-3 border-t border-zinc-100 px-6 py-4 dark:border-zinc-800">
-          <span className="inline-flex items-center gap-1.5 text-[11px] text-zinc-400"><Info className="h-3.5 w-3.5" /> Inválidos e duplicados são ignorados na importação.</span>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="rounded-xl border border-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800">Cancelar</button>
-            <PrimaryBtn onClick={onClose}><Check className="h-4 w-4" /> Importar 2.318 contatos</PrimaryBtn>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+/* Contatos e ImportModal foram movidos para ./screens/Contatos.jsx */
 
 /* ----------------------------- Nova campanha (wizard) ----------------------------- */
 function NovaCampanha({ setScreen }) {
@@ -801,6 +625,7 @@ function AppShell() {
   const [dark, setDark] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [campaignId, setCampaignId] = useState(null);
+  const [contactsReload, setContactsReload] = useState(0);
 
   const openCampaign = (id) => { setCampaignId(id); setScreen("campanha-detalhe"); };
   const [title, subtitle] = TITLES[screen] || TITLES.dashboard;
@@ -818,7 +643,7 @@ function AppShell() {
           <Topbar title={title} subtitle={subtitle} dark={dark} setDark={setDark} actions={topActions} onLogout={logout} />
           <main className="flex-1 overflow-y-auto">
             {screen === "dashboard" && <Dashboard setScreen={setScreen} openCampaign={openCampaign} />}
-            {screen === "contatos" && <Contatos openImport={() => setImportOpen(true)} />}
+            {screen === "contatos" && <Contatos openImport={() => setImportOpen(true)} reloadKey={contactsReload} />}
             {screen === "nova" && <NovaCampanha setScreen={setScreen} />}
             {screen === "campanhas" && <Campanhas openCampaign={openCampaign} setScreen={setScreen} />}
             {screen === "campanha-detalhe" && <CampanhaDetalhe campaignId={campaignId} setScreen={setScreen} />}
@@ -826,7 +651,7 @@ function AppShell() {
             {screen === "config" && <Configuracoes />}
           </main>
         </div>
-        {importOpen && <ImportModal onClose={() => setImportOpen(false)} />}
+        {importOpen && <ImportModal onClose={() => setImportOpen(false)} onImported={() => setContactsReload((k) => k + 1)} />}
       </div>
     </div>
   );
