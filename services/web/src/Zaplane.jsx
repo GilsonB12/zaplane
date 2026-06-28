@@ -8,12 +8,13 @@ import {
   Star,
 } from "lucide-react";
 import {
-  BRAND, TEAL, Card, StatusBadge, TplStatusBadge,
+  BRAND, TEAL, Card, StatusBadge,
   CategoryTag, ProgressBar, WhatsAppBubble, PrimaryBtn, Topbar, Sidebar,
 } from "./components/ui.jsx";
 import { AuthProvider, useAuth } from "./auth/AuthContext.jsx";
 import Login from "./screens/Login.jsx";
 import Contatos, { ImportModal } from "./screens/Contatos.jsx";
+import Templates from "./screens/Templates.jsx";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
 } from "recharts";
@@ -50,19 +51,14 @@ const CAMPANHAS = [
 ];
 
 
-const TEMPLATES = [
+// Templates de exemplo para o wizard NovaCampanha (apenas aprovados — mock local)
+const TEMPLATES_WIZARD = [
   { id: "t1", nome: "bf_aquecimento_v2", categoria: "Marketing", status: "aprovado", idioma: "pt_BR",
     corpo: "Oi {{1}}! 🛍️ A Black Friday da nossa loja começou. Você tem *15% OFF* exclusivo até amanhã. Toque para ver as ofertas.", botoes: ["Ver ofertas", "Sair da lista"] },
   { id: "t2", nome: "pedido_confirmado", categoria: "Utility", status: "aprovado", idioma: "pt_BR",
     corpo: "Olá {{1}}, seu pedido *{{2}}* foi confirmado e já está em separação. Acompanhe o status pelo link.", botoes: ["Acompanhar pedido"] },
-  { id: "t3", nome: "carrinho_abandonado", categoria: "Marketing", status: "em_analise", idioma: "pt_BR",
-    corpo: "{{1}}, você esqueceu alguns itens no carrinho 👀 Finalize agora e ganhe frete grátis.", botoes: ["Finalizar compra"] },
   { id: "t4", nome: "otp_login", categoria: "Authentication", status: "aprovado", idioma: "pt_BR",
     corpo: "Seu código de verificação é *{{1}}*. Ele expira em 5 minutos. Não compartilhe com ninguém.", botoes: ["Copiar código"] },
-  { id: "t5", nome: "nps_pos_venda", categoria: "Utility", status: "em_analise", idioma: "pt_BR",
-    corpo: "Olá {{1}}! Como foi sua experiência com a {{2}}? Responda de 0 a 10 — leva 10 segundos. 🙏", botoes: [] },
-  { id: "t6", nome: "promo_relampago", categoria: "Marketing", status: "rejeitado", idioma: "pt_BR",
-    corpo: "🔥🔥 PROMOÇÃO IMPERDÍVEL!!! CLIQUE JÁ E GANHE!!! Não perca essa chance ÚNICA!!!", botoes: ["GANHAR AGORA"] },
 ];
 
 const MEMBROS = [
@@ -192,7 +188,7 @@ function NovaCampanha({ setScreen }) {
   const [step, setStep] = useState(1);
   const [publico, setPublico] = useState("vip");
   const [tplId, setTplId] = useState("t1");
-  const tpl = TEMPLATES.find((t) => t.id === tplId);
+  const tpl = TEMPLATES_WIZARD.find((t) => t.id === tplId);
 
   const PUBLICOS = {
     vip:    { nome: "Lista · Clientes VIP", total: 4280, suprimidos: 96 },
@@ -201,7 +197,7 @@ function NovaCampanha({ setScreen }) {
   };
   const p = PUBLICOS[publico];
   const elegiveis = p.total - p.suprimidos;
-  const aprovados = TEMPLATES.filter((t) => t.status === "aprovado");
+  const aprovados = TEMPLATES_WIZARD.filter((t) => t.status === "aprovado");
 
   const steps = ["Público", "Template", "Revisão"];
 
@@ -470,34 +466,7 @@ function CampanhaDetalhe({ campaignId, setScreen }) {
   );
 }
 
-/* ----------------------------- Templates ----------------------------- */
-function Templates() {
-  const [cat, setCat] = useState("Todas");
-  const cats = ["Todas", "Marketing", "Utility", "Authentication"];
-  const list = TEMPLATES.filter((t) => cat === "Todas" || t.categoria === cat);
-  return (
-    <div className="space-y-5 p-7">
-      <div className="flex items-center gap-2">
-        {cats.map((c) => (
-          <button key={c} onClick={() => setCat(c)}
-            className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors ${cat === c ? "text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
-            style={cat === c ? { backgroundColor: BRAND } : undefined}>{c}</button>
-        ))}
-      </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {list.map((t) => (
-          <Card key={t.id} className="flex flex-col overflow-hidden">
-            <div className="flex items-start justify-between p-4 pb-3">
-              <div><div className="text-[13px] font-semibold text-zinc-900 dark:text-white">{t.nome}</div><div className="mt-1 flex items-center gap-1.5"><CategoryTag cat={t.categoria} /><span className="text-[11px] text-zinc-400">{t.idioma}</span></div></div>
-              <TplStatusBadge status={t.status} />
-            </div>
-            <div className="px-4 pb-4"><WhatsAppBubble corpo={t.corpo} botoes={t.botoes} /></div>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
-}
+/* Templates foram movidos para ./screens/Templates.jsx */
 
 /* ----------------------------- Configurações ----------------------------- */
 const RBAC_DESC = {

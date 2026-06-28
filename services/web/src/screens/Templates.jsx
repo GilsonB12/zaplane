@@ -1,0 +1,134 @@
+import React, { useMemo, useState } from "react";
+import { Plus } from "lucide-react";
+import { Card, TplStatusBadge, CategoryTag, WhatsAppBubble, PrimaryBtn } from "../components/ui.jsx";
+import { useResource } from "../hooks/useResource.js";
+import { toUiTemplate } from "../api/adapters.js";
+import { listTemplates, createTemplate } from "../api/endpoints.js";
+
+/* ----------------------------- Modal: Novo template ----------------------------- */
+function NovoTemplateModal({ open, onClose, onCreated }) {
+  const [form, setForm] = useState({ name: "", category: "MARKETING", body: "" });
+  const [error, setError] = useState(null);
+  const [pending, setPending] = useState(false);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  if (!open) return null;
+
+  async function submit() {
+    setError(null);
+    if (!/^[a-z0-9_]+$/.test(form.name)) {
+      setError("Nome: use apenas minúsculas, dígitos e underscore (ex.: promo_banho).");
+      return;
+    }
+    setPending(true);
+    try {
+      const r = await createTemplate({ name: form.name, category: form.category, body: form.body });
+      if (r?.metaWarning) console.info("[templates]", r.metaWarning);
+      onCreated();
+      onClose();
+    } catch (e) {
+      setError(e.message || "Falha ao criar template.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-base font-semibold text-zinc-900 dark:text-white">Novo template</h3>
+        <p className="mb-4 text-[13px] text-zinc-500 dark:text-zinc-400">Será enviado à Meta para aprovação quando o canal estiver configurado.</p>
+        <div className="space-y-3">
+          <input value={form.name} onChange={set("name")} placeholder="nome_do_template (minúsculas, _ )"
+            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100" />
+          <select value={form.category} onChange={set("category")}
+            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
+            <option value="MARKETING">Marketing</option>
+            <option value="UTILITY">Utility</option>
+            <option value="AUTHENTICATION">Authentication</option>
+          </select>
+          <textarea value={form.body} onChange={set("body")} rows={4} placeholder="Corpo. Use {{1}}, {{2}} para variáveis."
+            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100" />
+          {form.body && <WhatsAppBubble corpo={form.body} botoes={[]} />}
+          {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-[12px] text-red-700 dark:bg-red-500/10 dark:text-red-300">{error}</div>}
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-xl border border-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">Cancelar</button>
+          <button onClick={submit} disabled={pending} className="rounded-xl px-3.5 py-2 text-sm font-semibold text-white disabled:opacity-60" style={{ backgroundColor: "#0F8C5A" }}>
+            {pending ? "Criando…" : "Criar template"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------- Templates (tela principal) ----------------------------- */
+export default function Templates() {
+  const [cat, setCat] = useState("Todas");
+  const [modalOpen, setModalOpen] = useState(false);
+  const { data, loading, error, reload } = useResource(() => listTemplates(), []);
+  const templates = useMemo(() => (data ?? []).map(toUiTemplate), [data]);
+  const filtrados = cat === "Todas" ? templates : templates.filter((t) => t.categoria === cat);
+
+  const cats = ["Todas", "Marketing", "Utility", "Authentication"];
+
+  return (
+    <div className="space-y-5 p-7">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {cats.map((c) => (
+            <button key={c} onClick={() => setCat(c)}
+              className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors ${cat === c ? "text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
+              style={cat === c ? { backgroundColor: "#0F8C5A" } : undefined}>{c}</button>
+          ))}
+        </div>
+        <PrimaryBtn onClick={() => setModalOpen(true)}><Plus className="h-4 w-4" /> Novo template</PrimaryBtn>
+      </div>
+
+      {/* Estado de carregamento */}
+      {loading && (
+        <div className="flex items-center justify-center py-16 text-[13px] text-zinc-400">
+          Carregando templates…
+        </div>
+      )}
+
+      {/* Estado de erro */}
+      {error && !loading && (
+        <div className="flex flex-col items-center gap-3 py-16">
+          <div className="rounded-lg bg-red-50 px-4 py-3 text-[13px] text-red-700 dark:bg-red-500/10 dark:text-red-300">
+            Falha ao carregar templates: {error.message || String(error)}
+          </div>
+          <button onClick={reload} className="rounded-xl border border-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800">
+            Tentar novamente
+          </button>
+        </div>
+      )}
+
+      {/* Grid de templates */}
+      {!loading && !error && (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {filtrados.length === 0 ? (
+            <div className="col-span-full py-16 text-center text-[13px] text-zinc-400">
+              Nenhum template encontrado{cat !== "Todas" ? ` na categoria "${cat}"` : ""}.
+            </div>
+          ) : (
+            filtrados.map((t) => (
+              <Card key={t.id} className="flex flex-col overflow-hidden">
+                <div className="flex items-start justify-between p-4 pb-3">
+                  <div>
+                    <div className="text-[13px] font-semibold text-zinc-900 dark:text-white">{t.nome}</div>
+                    <div className="mt-1 flex items-center gap-1.5"><CategoryTag cat={t.categoria} /><span className="text-[11px] text-zinc-400">{t.idioma}</span></div>
+                  </div>
+                  <TplStatusBadge status={t.status} />
+                </div>
+                <div className="px-4 pb-4"><WhatsAppBubble corpo={t.corpo} botoes={t.botoes} /></div>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      <NovoTemplateModal open={modalOpen} onClose={() => setModalOpen(false)} onCreated={reload} />
+    </div>
+  );
+}
