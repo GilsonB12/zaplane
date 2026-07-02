@@ -13,6 +13,7 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { MessagesModule } from './messages/messages.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { PrivacyModule } from './privacy/privacy.module';
+import { ConversationsModule } from './conversations/conversations.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { PrivacyModule } from './privacy/privacy.module';
     MessagesModule,
     WebhooksModule,
     PrivacyModule,
+    ConversationsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
