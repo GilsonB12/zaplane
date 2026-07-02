@@ -49,10 +49,12 @@ export default function EnviarMensagemModal({ contato, onClose }) {
     return { aberta, expiresAt: item?.windowExpiresAt ?? null };
   }, [winRes.data, contato.tel]);
 
-  // aplica o modo padrão UMA vez, quando a janela chega — não briga com cliques do usuário
+  // aplica o modo padrão UMA vez, quando a janela chega — e NUNCA depois de um
+  // clique explícito do usuário nas abas (mesmo que o fetch resolva depois)
   const modoInicialAplicado = useRef(false);
+  const usuarioEscolheu = useRef(false);
   useEffect(() => {
-    if (modoInicialAplicado.current || !janela) return;
+    if (modoInicialAplicado.current || usuarioEscolheu.current || !janela) return;
     modoInicialAplicado.current = true;
     if (janela.aberta) setModo("texto");
   }, [janela]);
@@ -132,7 +134,7 @@ export default function EnviarMensagemModal({ contato, onClose }) {
               const I = a.icon;
               const ativa = modo === a.id;
               return (
-                <button key={a.id} onClick={() => { setModo(a.id); setErro(null); setFeito(null); }}
+                <button key={a.id} onClick={() => { usuarioEscolheu.current = true; setModo(a.id); setErro(null); setFeito(null); }}
                   className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors ${
                     ativa ? "bg-white text-[#0F8C5A] shadow-sm dark:bg-zinc-900 dark:text-emerald-300" : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100"}`}>
                   <I className="h-4 w-4" /> {a.label}
