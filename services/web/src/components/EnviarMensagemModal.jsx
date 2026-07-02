@@ -1,10 +1,23 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { X, LayoutTemplate, MessageSquare, Info, CheckCircle2 } from "lucide-react";
 import { WhatsAppBubble } from "./ui.jsx";
 import { useResource, useMutation } from "../hooks/useResource.js";
 import { toUiTemplate } from "../api/adapters.js";
-import { listTemplates, sendSingle, sendText } from "../api/endpoints.js";
+import { getWindows, listTemplates, sendSingle, sendText } from "../api/endpoints.js";
 import { extrairVariaveis, preencherCorpo } from "../utils/template.js";
+
+const soDigitos = (v) => String(v ?? "").replace(/\D/g, "");
+
+// countdown "expira em Xh Ym" a partir de windowExpiresAt
+function expiraEm(iso) {
+  if (!iso) return "";
+  const diffMs = new Date(iso).getTime() - Date.now();
+  if (diffMs <= 0) return "expirada";
+  const totalMin = Math.floor(diffMs / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return `expira em ${h}h ${m}m`;
+}
 
 /**
  * Mensagem avulsa para 1 contato (fora de campanha).
@@ -25,6 +38,25 @@ export default function EnviarMensagemModal({ contato, onClose }) {
     () => (tplRes.data ?? []).map(toUiTemplate).filter((t) => t.status === "aprovado"),
     [tplRes.data],
   );
+
+  // janela de 24h do contato — pré-seleciona "texto livre" quando ela está aberta
+  const winRes = useResource(() => getWindows(), []);
+  const janela = useMemo(() => {
+    if (!winRes.data) return null; // ainda carregando
+    const alvo = soDigitos(contato.tel);
+    const item = (winRes.data.items ?? []).find((w) => soDigitos(w.phone) === alvo);
+    const aberta = !!item?.windowExpiresAt && new Date(item.windowExpiresAt) > new Date();
+    return { aberta, expiresAt: item?.windowExpiresAt ?? null };
+  }, [winRes.data, contato.tel]);
+
+  // aplica o modo padrão UMA vez, quando a janela chega — não briga com cliques do usuário
+  const modoInicialAplicado = useRef(false);
+  useEffect(() => {
+    if (modoInicialAplicado.current || !janela) return;
+    modoInicialAplicado.current = true;
+    if (janela.aberta) setModo("texto");
+  }, [janela]);
+
   const tpl = aprovados.find((t) => t.id === templateId) ?? aprovados[0] ?? null;
   const variaveis = useMemo(() => (tpl ? extrairVariaveis(tpl.corpo) : []), [tpl]);
   const todasPreenchidas = variaveis.every((n) => (valores[n] ?? "").trim() !== "");
@@ -74,9 +106,23 @@ export default function EnviarMensagemModal({ contato, onClose }) {
               {" "}<span className="tabular-nums">{contato.tel}</span>
             </p>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-3">
+            {janela && (
+              <span
+                title={janela.aberta ? expiraEm(janela.expiresAt) : "Janela de 24h fechada"}
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${
+                  janela.aberta
+                    ? "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300"
+                    : "bg-zinc-100 text-zinc-500 ring-zinc-500/20 dark:bg-zinc-800 dark:text-zinc-400"
+                }`}
+              >
+                {janela.aberta ? `🟢 janela aberta — ${expiraEm(janela.expiresAt)}` : "⚪ janela fechada — use template"}
+              </span>
+            )}
+            <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         <div className="space-y-4 p-6">

@@ -8,8 +8,21 @@ import { Card, ConsentChip, PrimaryBtn } from "../components/ui.jsx";
 import { useResource, useMutation } from "../hooks/useResource.js";
 import { toUiContact } from "../api/adapters.js";
 import {
-  listContacts, updateContact, removeContact, optOutContact, importContacts,
+  listContacts, updateContact, removeContact, optOutContact, importContacts, getWindows,
 } from "../api/endpoints.js";
+
+const soDigitos = (v) => String(v ?? "").replace(/\D/g, "");
+
+// countdown "expira em Xh Ym" a partir de windowExpiresAt
+function expiraEm(iso) {
+  if (!iso) return "";
+  const diffMs = new Date(iso).getTime() - Date.now();
+  if (diffMs <= 0) return "expirada";
+  const totalMin = Math.floor(diffMs / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return `expira em ${h}h ${m}m`;
+}
 
 /* ----------------------------- EditContactModal ----------------------------- */
 function EditContactModal({ contato, onClose, onSaved }) {
@@ -273,6 +286,18 @@ export default function Contatos({ openImport, reloadKey }) {
     [q, consent, reloadKey],
   );
 
+  // janela de 24h por contato — badge 🟢 ao lado do telefone quando aberta
+  const winRes = useResource(() => getWindows(), [reloadKey]);
+  const janelaPorTelefone = useMemo(() => {
+    const map = new Map();
+    for (const w of winRes.data?.items ?? []) {
+      if (w.windowExpiresAt && new Date(w.windowExpiresAt) > new Date()) {
+        map.set(soDigitos(w.phone), w.windowExpiresAt);
+      }
+    }
+    return map;
+  }, [winRes.data]);
+
   const contatos = useMemo(() => (data?.items ?? []).map(toUiContact), [data]);
   const regioes = [...new Set(contatos.map((c) => c.regiao).filter(Boolean))];
   const tags = [...new Set(contatos.map((c) => c.tag).filter(Boolean))];
@@ -383,7 +408,17 @@ export default function Contatos({ openImport, reloadKey }) {
                         </div>
                         <div>
                           <div className="font-medium text-zinc-800 dark:text-zinc-100">{c.nome}</div>
-                          <div className="text-[12px] tabular-nums text-zinc-400">{c.tel}</div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[12px] tabular-nums text-zinc-400">{c.tel}</span>
+                            {janelaPorTelefone.has(soDigitos(c.tel)) && (
+                              <span
+                                className="text-[11px] leading-none"
+                                title={`Janela aberta — ${expiraEm(janelaPorTelefone.get(soDigitos(c.tel)))}`}
+                              >
+                                🟢
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </td>
