@@ -46,6 +46,23 @@ function expiraEm(iso) {
   return `expira em ${h}h ${m}m`;
 }
 
+// countdown curto "Xh Ym" pro selo inline da lista (ex.: "3h12m")
+function expiraEmCurto(iso) {
+  if (!iso) return "";
+  const diffMs = new Date(iso).getTime() - Date.now();
+  if (diffMs <= 0) return "expirada";
+  const totalMin = Math.floor(diffMs / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return `${h}h${m}m`;
+}
+
+// avatar: iniciais do nome; sem nome, usa os 2 últimos dígitos do telefone
+function avatarLabel(nome, phone) {
+  if (nome && nome.trim()) return iniciais(nome);
+  return (phone || "").replace(/\D/g, "").slice(-2);
+}
+
 const STATUS_OUT = {
   queued: { label: "na fila", icon: Clock, cls: "text-zinc-400" },
   sent: { label: "enviado", icon: Check, cls: "text-zinc-400" },
@@ -75,7 +92,13 @@ export default function Conversas() {
     () => (sel ? getConversation(sel) : Promise.resolve(null)),
     [sel, tick],
   );
-  const thread = threadRes.data;
+
+  const [thread, setThread] = useState(null);
+  useEffect(() => { setThread(null); }, [sel]); // troca → limpa (mostra "Carregando…")
+  useEffect(() => { if (threadRes.data) setThread(threadRes.data); }, [threadRes.data]); // chegada → atualiza sem piscar
+
+  // Troca de conversa: limpa rascunho e erro (evita enviar texto de A para B)
+  useEffect(() => { setTexto(""); setErroEnvio(null); }, [sel]);
 
   const convSel = conversas.find((c) => c.phone === sel) ?? null;
   const nomeSel = convSel?.name ?? thread?.contact?.name ?? sel;
@@ -133,7 +156,7 @@ export default function Conversas() {
                 }`}
               >
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300">
-                  {iniciais(titulo)}
+                  {avatarLabel(c.name, c.phone)}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
@@ -147,6 +170,11 @@ export default function Conversas() {
                     >
                       {c.windowOpen ? "🟢" : "⚪"}
                     </span>
+                    {c.windowOpen && (
+                      <span className="shrink-0 text-[10px] text-zinc-400" title={expiraEm(c.windowExpiresAt)}>
+                        {expiraEmCurto(c.windowExpiresAt)}
+                      </span>
+                    )}
                     <span className="truncate text-[12px] text-zinc-400">
                       {deVoce ? "Você: " : ""}
                       {c.lastMessage?.preview || ""}
@@ -186,8 +214,8 @@ export default function Conversas() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto bg-[#E5DDD5]/40 px-5 py-4 dark:bg-zinc-900/40">
-              {!thread && threadRes.loading && (
-                <div className="text-center text-sm text-zinc-400">Carregando mensagens…</div>
+              {!thread && (
+                <div className="text-center text-sm text-zinc-400">Carregando conversa…</div>
               )}
               {thread && thread.items.length === 0 && (
                 <div className="text-center text-sm text-zinc-400">Nenhuma mensagem nesta conversa ainda.</div>
