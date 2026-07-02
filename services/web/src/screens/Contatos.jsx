@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import {
-  Search, Filter, Upload, MessageSquare, Edit2, Trash2,
+  Search, Filter, Upload, BellOff, Edit2, Trash2,
   ChevronDown, X, ShieldCheck, Check, FileSpreadsheet, FileJson, Info,
 } from "lucide-react";
 import { Card, ConsentChip, PrimaryBtn } from "../components/ui.jsx";
@@ -280,8 +280,24 @@ export default function Contatos({ openImport, reloadKey }) {
 
   const del = useMutation(removeContact);
   const opt = useMutation(optOutContact);
-  async function onRemove(id) { await del.run(id); reload(); }
-  async function onOptOut(id) { await opt.run(id); reload(); }
+  async function onRemove(c) {
+    const ok = window.confirm(`Remover ${c.nome} (${c.tel}) da base de contatos?`);
+    if (!ok) return;
+    await del.run(c.id);
+    reload();
+  }
+  // opt-out é praticamente irreversível na prática (suprime o contato de
+  // todos os disparos) — confirmar antes evita cliques acidentais
+  async function onOptOut(c) {
+    const ok = window.confirm(
+      `Marcar ${c.nome} (${c.tel}) como OPT-OUT?\n\n` +
+      "O contato será suprimido de todas as campanhas e disparos. " +
+      "Use apenas quando a pessoa pediu para não receber mensagens.",
+    );
+    if (!ok) return;
+    await opt.run(c.id);
+    reload();
+  }
 
   const sel = (v, set, opts, ph) => (
     <div className="relative">
@@ -381,12 +397,12 @@ export default function Contatos({ openImport, reloadKey }) {
                     <td className="px-5 py-3">
                       <div className="flex items-center justify-end gap-1">
                         <button
-                          title="Opt-out"
+                          title="Marcar opt-out (descadastrar dos disparos)"
                           disabled={c.consent === "optout"}
-                          onClick={() => onOptOut(c.id)}
-                          className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-[#0F8C5A] disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-zinc-800"
+                          onClick={() => onOptOut(c)}
+                          className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-amber-50 hover:text-amber-600 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-amber-500/10"
                         >
-                          <MessageSquare className="h-4 w-4" />
+                          <BellOff className="h-4 w-4" />
                         </button>
                         <button
                           title="Editar"
@@ -397,7 +413,7 @@ export default function Contatos({ openImport, reloadKey }) {
                         </button>
                         <button
                           title="Remover"
-                          onClick={() => onRemove(c.id)}
+                          onClick={() => onRemove(c)}
                           className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"
                         >
                           <Trash2 className="h-4 w-4" />
