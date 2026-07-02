@@ -14,13 +14,75 @@ export class TemplatesService {
   }
 
   /**
-   * Sincroniza o status de aprovação dos templates a partir da Meta.
-   * TODO: GET https://graph.facebook.com/{version}/{waba_id}/message_templates
-   * usando o access token do canal, e fazer upsert de name/category/status/body.
+   * Sincroniza os templates a partir da Meta (fonte da verdade): status de
+   * aprovação, categoria (a Meta pode recategorizar na análise) e corpo.
+   * Upsert por (org, name, language); templates criados direto no painel da
+   * Meta passam a existir localmente. Env-gated: sem canal real, não faz nada.
    */
   async sync(orgId: string) {
+    const channel = await this.prisma.whatsappChannel.findFirst({
+      where: { organizationId: orgId, status: 'active' },
+    });
+    if (!channel || !looksConfigured(channel.wabaId) || !looksConfigured(channel.accessTokenEnc)) {
+      return { synced: false, note: 'Sem canal Meta configurado nesta organização.' };
+    }
+
     const version = this.config.get<string>('whatsapp.graphVersion');
-    return { synced: false, note: `Stub. Implementar GET ${version}/{waba_id}/message_templates.` };
+    const token = readToken(channel.accessTokenEnc);
+
+    // GET /message_templates paginado (paging.next já vem como URL completa)
+    const remotos: any[] = [];
+    try {
+      let url: string | undefined =
+        `https://graph.facebook.com/${version}/${channel.wabaId}/message_templates?limit=100`;
+      let paginas = 0;
+      while (url && paginas < 10) {
+        const { data } = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+        remotos.push(...(data?.data ?? []));
+        url = data?.paging?.next;
+        paginas++;
+      }
+    } catch (e: any) {
+      const detalhe = e?.response?.data?.error?.message ?? e?.message ?? String(e);
+      return { synced: false, note: `Falha ao consultar a Meta: ${detalhe}` };
+    }
+
+    let atualizados = 0;
+    let criados = 0;
+    for (const r of remotos) {
+      if (!r?.name || !r?.language) continue;
+      const body: string | null =
+        (r.components ?? []).find((c: any) => c?.type === 'BODY')?.text ?? null;
+      const campos = {
+        category: r.category ?? 'MARKETING',
+        status: statusLocal(r.status),
+        metaTemplateId: r.id ?? null,
+        ...(body != null ? { body, variablesCount: countVariables(body) } : {}),
+      };
+      const existente = await this.prisma.template.findFirst({
+        where: { organizationId: orgId, name: r.name, language: r.language },
+      });
+      if (existente) {
+        await this.prisma.template.update({ where: { id: existente.id }, data: campos });
+        atualizados++;
+      } else {
+        await this.prisma.template.create({
+          data: {
+            organizationId: orgId,
+            name: r.name,
+            language: r.language,
+            body,
+            variablesCount: body != null ? countVariables(body) : 0,
+            category: campos.category,
+            status: campos.status,
+            metaTemplateId: campos.metaTemplateId,
+          },
+        });
+        criados++;
+      }
+    }
+
+    return { synced: true, total: remotos.length, atualizados, criados };
   }
 
   async create(orgId: string, dto: CreateTemplateDto) {
@@ -88,6 +150,18 @@ export class TemplatesService {
       { headers: { Authorization: `Bearer ${token}` } },
     );
     return { id: data?.id };
+  }
+}
+
+// A Meta tem mais estados (PAUSED, IN_APPEAL, PENDING_DELETION…) que o nosso
+// enum local; mapeia para APPROVED | PENDING | REJECTED | DISABLED (check do schema).
+function statusLocal(metaStatus?: string): string {
+  switch (metaStatus) {
+    case 'APPROVED': return 'APPROVED';
+    case 'PENDING':
+    case 'IN_APPEAL': return 'PENDING';
+    case 'REJECTED': return 'REJECTED';
+    default: return 'DISABLED';
   }
 }
 

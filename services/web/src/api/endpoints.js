@@ -37,6 +37,7 @@ export function importContacts(file, consentStatus, consentSource, defaultCountr
 export const listLists = () => api.get("/lists");
 export const listTemplates = () => api.get("/templates");
 export const createTemplate = (dto) => api.post("/templates", dto);
+export const syncTemplates = () => api.post("/templates/sync"); // puxa status/categoria da Meta
 
 /* ---- Campanhas ---- */
 export const createCampaign = (dto) => api.post("/campaigns", dto);

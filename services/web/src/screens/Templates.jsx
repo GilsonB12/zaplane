@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { Card, TplStatusBadge, CategoryTag, WhatsAppBubble, PrimaryBtn } from "../components/ui.jsx";
-import { useResource } from "../hooks/useResource.js";
+import { useResource, useMutation } from "../hooks/useResource.js";
 import { toUiTemplate } from "../api/adapters.js";
-import { listTemplates, createTemplate } from "../api/endpoints.js";
+import { listTemplates, createTemplate, syncTemplates } from "../api/endpoints.js";
 
 /* ----------------------------- Modal: Novo template ----------------------------- */
 function NovoTemplateModal({ open, onClose, onCreated }) {
@@ -66,11 +66,29 @@ function NovoTemplateModal({ open, onClose, onCreated }) {
 export default function Templates() {
   const [cat, setCat] = useState("Todas");
   const [modalOpen, setModalOpen] = useState(false);
+  const [syncNote, setSyncNote] = useState(null);
   const { data, loading, error, reload } = useResource(() => listTemplates(), []);
   const templates = useMemo(() => (data ?? []).map(toUiTemplate), [data]);
   const filtrados = cat === "Todas" ? templates : templates.filter((t) => t.categoria === cat);
 
   const cats = ["Todas", "Marketing", "Utility", "Authentication"];
+
+  // Sincroniza status/categoria com a Meta e recarrega a galeria
+  const sync = useMutation(syncTemplates);
+  async function onSync() {
+    setSyncNote(null);
+    try {
+      const r = await sync.run();
+      if (r?.synced) {
+        setSyncNote(`Sincronizado com a Meta: ${r.total} template(s) — ${r.atualizados} atualizado(s), ${r.criados} novo(s).`);
+        reload();
+      } else {
+        setSyncNote(r?.note || "Não foi possível sincronizar.");
+      }
+    } catch (e) {
+      setSyncNote(e.message || "Falha ao sincronizar.");
+    }
+  }
 
   return (
     <div className="space-y-5 p-7">
@@ -82,8 +100,25 @@ export default function Templates() {
               style={cat === c ? { backgroundColor: "#0F8C5A" } : undefined}>{c}</button>
           ))}
         </div>
-        <PrimaryBtn onClick={() => setModalOpen(true)}><Plus className="h-4 w-4" /> Novo template</PrimaryBtn>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onSync}
+            disabled={sync.pending}
+            title="Puxar status e categoria dos templates direto da Meta"
+            className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            <RefreshCw className={`h-4 w-4 ${sync.pending ? "animate-spin" : ""}`} />
+            {sync.pending ? "Sincronizando…" : "Sincronizar"}
+          </button>
+          <PrimaryBtn onClick={() => setModalOpen(true)}><Plus className="h-4 w-4" /> Novo template</PrimaryBtn>
+        </div>
       </div>
+
+      {syncNote && (
+        <div className="rounded-xl bg-zinc-100 px-4 py-2 text-[13px] text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-300">
+          {syncNote}
+        </div>
+      )}
 
       {/* Estado de carregamento */}
       {loading && (
