@@ -6,6 +6,7 @@ import {
 import { AuthProvider, useAuth } from "./auth/AuthContext.jsx";
 import Login from "./screens/Login.jsx";
 import Contatos, { ImportModal } from "./screens/Contatos.jsx";
+import Conversas from "./screens/Conversas.jsx";
 import Templates from "./screens/Templates.jsx";
 import Campanhas, { NovaCampanha, CampanhaDetalhe } from "./screens/Campanhas.jsx";
 import Dashboard from "./screens/Dashboard.jsx";
@@ -15,6 +16,7 @@ import Configuracoes from "./screens/Configuracoes.jsx";
 const TITLES = {
   dashboard: ["Dashboard", "Visão geral da sua operação de mensagens"],
   contatos: ["Contatos", "Gerencie sua base e o consentimento (LGPD)"],
+  conversas: ["Conversas", "Responda na janela de 24h ou inicie com template"],
   nova: ["Nova campanha", "Configure público, template e disparo"],
   campanhas: ["Campanhas", "Acompanhe disparos em tempo real"],
   "campanha-detalhe": ["Detalhe da campanha", "Progresso e métricas em tempo real"],
@@ -47,6 +49,7 @@ function AppShell() {
           <main className="flex-1 overflow-y-auto">
             {screen === "dashboard" && <Dashboard setScreen={setScreen} openCampaign={openCampaign} />}
             {screen === "contatos" && <Contatos openImport={() => setImportOpen(true)} reloadKey={contactsReload} />}
+            {screen === "conversas" && <Conversas />}
             {screen === "nova" && <NovaCampanha setScreen={setScreen} openCampaign={openCampaign} />}
             {screen === "campanhas" && <Campanhas openCampaign={openCampaign} setScreen={setScreen} />}
             {screen === "campanha-detalhe" && <CampanhaDetalhe campaignId={campaignId} setScreen={setScreen} />}

@@ -48,6 +48,12 @@ export const listCampaigns = (query = {}) => {
   return api.get(`/campaigns${qs ? `?${qs}` : ""}`);
 };
 
+/* ---- Conversas (inbox 1:1) ---- */
+export const listConversations = () => api.get("/conversations");
+export const getConversation = (phone) =>
+  api.get(`/conversations/${encodeURIComponent(String(phone).replace(/\D/g, ""))}/messages`);
+export const getWindows = () => api.get("/conversations/windows");
+
 /* ---- Envio avulso / Privacidade (LGPD) ---- */
 export const sendSingle = (dto) => api.post("/messages/send", dto);   // template p/ 1 número
 export const sendText = (dto) => api.post("/messages/text", dto);     // texto livre (janela 24h)

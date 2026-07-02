@@ -2,6 +2,7 @@ import React from "react";
 import {
   CheckCheck, BadgeCheck, Clock, XCircle, Zap, ShieldCheck, Sun, Moon,
   LayoutDashboard, Users, Send, Megaphone, LayoutTemplate, Settings, LogOut,
+  MessagesSquare,
 } from "lucide-react";
 
 /* ----------------------------- Tokens de cor ----------------------------- */
@@ -42,6 +43,7 @@ export const CAT_META = {
 export const NAV = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "contatos", label: "Contatos", icon: Users },
+  { id: "conversas", label: "Conversas", icon: MessagesSquare },
   { id: "nova", label: "Nova campanha", icon: Send },
   { id: "campanhas", label: "Campanhas", icon: Megaphone },
   { id: "templates", label: "Templates", icon: LayoutTemplate },
