@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import {
   MoreVertical, ChevronLeft, ChevronRight, Send, Zap, CheckCheck, FileText,
-  AlertTriangle, BadgeCheck, ShieldCheck, Check,
+  AlertTriangle, BadgeCheck, ShieldCheck, Check, UserRound, X,
 } from "lucide-react";
 import {
   Card, StatusBadge, CategoryTag, ProgressBar, PrimaryBtn, BRAND, TEAL,
@@ -106,11 +106,45 @@ export default function Campanhas({ openCampaign }) {
 }
 
 /* ----------------------------- Nova campanha (wizard) ----------------------------- */
+/* ------------------- Helpers de variáveis do template ------------------- */
+
+// Extrai os números das variáveis {{1}}, {{2}}… do corpo (únicos, ordenados).
+function extrairVariaveis(corpo) {
+  const nums = new Set();
+  for (const m of (corpo ?? "").matchAll(/\{\{\s*(\d+)\s*\}\}/g)) nums.add(Number(m[1]));
+  return [...nums].sort((a, b) => a - b);
+}
+
+// Trecho do corpo ao redor da variável — mostra ONDE ela cai no texto.
+function contextoDaVariavel(corpo, n) {
+  const re = new RegExp(`\\{\\{\\s*${n}\\s*\\}\\}`);
+  const m = re.exec(corpo ?? "");
+  if (!m) return "";
+  const ini = Math.max(0, m.index - 20);
+  const fim = Math.min(corpo.length, m.index + m[0].length + 20);
+  const antes = (ini > 0 ? "…" : "") + corpo.slice(ini, m.index);
+  const depois = corpo.slice(m.index + m[0].length, fim) + (fim < corpo.length ? "…" : "");
+  return `${antes}___${depois}`.replace(/\s+/g, " ").trim();
+}
+
+// Substitui as variáveis para a prévia: valor digitado; {{name}} → «nome do
+// contato» (dinâmico); vazia → ⟦variável N⟧ (pendência, destacada no balão).
+function preencherCorpo(corpo, vars, valores) {
+  let out = corpo ?? "";
+  for (const n of vars) {
+    const v = (valores[n] ?? "").trim();
+    const texto = v === "{{name}}" ? "«nome do contato»" : v || `⟦variável ${n}⟧`;
+    out = out.replace(new RegExp(`\\{\\{\\s*${n}\\s*\\}\\}`, "g"), texto);
+  }
+  return out;
+}
+
 export function NovaCampanha({ setScreen, openCampaign }) {
   const [step, setStep] = useState(1);
   const [listId, setListId] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [nome, setNome] = useState("");
+  const [valores, setValores] = useState({}); // {1: "texto fixo", 2: "{{name}}", ...}
   const [erroCriacao, setErroCriacao] = useState(null);
 
   const listsRes = useResource(() => listLists(), []);
@@ -129,6 +163,11 @@ export function NovaCampanha({ setScreen, openCampaign }) {
   // Garante que templateId é sincronizado quando o primeiro template carrega
   const tplIdEfetivo = tpl ? (templateId || tpl.id) : templateId;
 
+  // Variáveis do template selecionado + estado de preenchimento
+  const variaveis = useMemo(() => (tpl ? extrairVariaveis(tpl.corpo) : []), [tpl]);
+  const todasPreenchidas = variaveis.every((n) => (valores[n] ?? "").trim() !== "");
+  const corpoPrevia = tpl ? preencherCorpo(tpl.corpo, variaveis, valores) : "";
+
   // Lista selecionada (vazia = todos os contatos do org)
   const listaAtual = listas.find((l) => l.id === listId) ?? null;
 
@@ -142,12 +181,16 @@ export function NovaCampanha({ setScreen, openCampaign }) {
   async function confirmar() {
     setErroCriacao(null);
     try {
+      // Monta {"1": valor, "2": "{{name}}"} — o gateway resolve {{name}} por contato
+      const templateParams = {};
+      for (const n of variaveis) templateParams[String(n)] = (valores[n] ?? "").trim();
+
       // channelId omitido de propósito → o gateway usa o canal ativo do org (Task A5)
       const r = await create.run({
         name: nome || "Campanha sem nome",
         templateId: tplIdEfetivo,
         listId: listId || undefined,
-        templateParams: {},
+        templateParams,
       });
       openCampaign(r.campaignId);
     } catch (e) {
@@ -293,7 +336,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
                     <input
                       type="radio"
                       checked={tplIdEfetivo === t.id}
-                      onChange={() => setTemplateId(t.id)}
+                      onChange={() => { setTemplateId(t.id); setValores({}); }}
                       className="accent-[#0F8C5A]"
                     />
                     <div className="flex-1">
@@ -306,36 +349,75 @@ export function NovaCampanha({ setScreen, openCampaign }) {
                   </label>
                 ))}
 
-                {tpl && (
+                {tpl && variaveis.length > 0 && (
                   <div className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-800/40">
-                    <div className="mb-2 text-[12px] font-medium text-zinc-600 dark:text-zinc-300">Variáveis</div>
-                    {/* TODO (Fatia 2): ligar estes campos a templateParams */}
-                    <div className="space-y-2">
-                      <div>
-                        <div className="mb-1 text-[11px] text-zinc-400">{"{{1}}"} — Nome</div>
-                        <input
-                          defaultValue="Mariana"
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[13px] outline-none focus:border-[#0F8C5A] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                        />
-                      </div>
-                      {tpl.corpo.includes("{{2}}") && (
-                        <div>
-                          <div className="mb-1 text-[11px] text-zinc-400">{"{{2}}"} — Pedido</div>
-                          <input
-                            defaultValue="#48213"
-                            className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[13px] outline-none focus:border-[#0F8C5A] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                          />
-                        </div>
-                      )}
+                    <div className="mb-1 text-[12px] font-medium text-zinc-600 dark:text-zinc-300">
+                      Variáveis do template
                     </div>
+                    <p className="mb-2.5 text-[11px] leading-snug text-zinc-400">
+                      O texto tem espaços a preencher. Digite um valor (igual para todos)
+                      ou use o <span className="font-medium">nome do contato</span> para
+                      personalizar por destinatário. Acompanhe na prévia ao lado.
+                    </p>
+                    <div className="space-y-2.5">
+                      {variaveis.map((n) => {
+                        const usaNome = (valores[n] ?? "") === "{{name}}";
+                        return (
+                          <div key={n}>
+                            <div className="mb-1 text-[11px] text-zinc-400">
+                              Variável <span className="font-mono font-medium text-zinc-500 dark:text-zinc-300">{`{{${n}}}`}</span>
+                              {" · "}
+                              <span className="italic">“{contextoDaVariavel(tpl.corpo, n)}”</span>
+                            </div>
+                            {usaNome ? (
+                              <div className="flex items-center justify-between rounded-lg border border-emerald-300/70 bg-emerald-50 px-2.5 py-1.5 text-[13px] font-medium text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+                                <span className="inline-flex items-center gap-1.5">
+                                  <UserRound className="h-3.5 w-3.5" /> Nome do contato
+                                </span>
+                                <button
+                                  title="Voltar a digitar um valor fixo"
+                                  onClick={() => setValores((v) => ({ ...v, [n]: "" }))}
+                                  className="rounded p-0.5 text-emerald-600 hover:bg-emerald-100 dark:text-emerald-300 dark:hover:bg-emerald-500/20"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex gap-1.5">
+                                <input
+                                  value={valores[n] ?? ""}
+                                  onChange={(e) => setValores((v) => ({ ...v, [n]: e.target.value }))}
+                                  placeholder="Digite o valor…"
+                                  className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[13px] outline-none focus:border-[#0F8C5A] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                                />
+                                <button
+                                  title="Usar o nome de cada contato (personalizado)"
+                                  onClick={() => setValores((v) => ({ ...v, [n]: "{{name}}" }))}
+                                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-zinc-200 px-2 text-[11px] font-medium text-zinc-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-300"
+                                >
+                                  <UserRound className="h-3.5 w-3.5" /> Nome
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {!todasPreenchidas && (
+                      <p className="mt-2.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                        Preencha {variaveis.length === 1 ? "a variável" : `as ${variaveis.length} variáveis`} para continuar.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
 
               {tpl && (
                 <div>
-                  <div className="mb-2 text-[12px] font-medium text-zinc-500 dark:text-zinc-400">Prévia</div>
-                  <WhatsAppBubble corpo={tpl.corpo} botoes={tpl.botoes} />
+                  <div className="mb-2 text-[12px] font-medium text-zinc-500 dark:text-zinc-400">
+                    Prévia {variaveis.length > 0 && <span className="text-zinc-400">— atualiza enquanto você digita</span>}
+                  </div>
+                  <WhatsAppBubble corpo={corpoPrevia} botoes={tpl.botoes} />
                 </div>
               )}
             </div>
@@ -355,6 +437,10 @@ export function NovaCampanha({ setScreen, openCampaign }) {
                 ["Público", nomePublico],
                 ["Template", tpl?.nome ?? "—"],
                 ["Categoria", tpl?.categoria ?? "—"],
+                ...variaveis.map((n) => [
+                  `Variável {{${n}}}`,
+                  (valores[n] ?? "") === "{{name}}" ? "Nome do contato" : (valores[n] ?? "").trim() || "—",
+                ]),
                 ["País", "Brasil (+55)"],
               ].map(([k, v]) => (
                 <div
@@ -382,7 +468,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
             {tpl && (
               <div>
                 <div className="mb-2 text-[12px] font-medium text-zinc-500 dark:text-zinc-400">Mensagem final</div>
-                <WhatsAppBubble corpo={tpl.corpo} botoes={tpl.botoes} />
+                <WhatsAppBubble corpo={corpoPrevia} botoes={tpl.botoes} />
               </div>
             )}
           </div>
@@ -401,7 +487,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
         {step < 3 ? (
           <PrimaryBtn
             onClick={() => setStep(step + 1)}
-            disabled={step === 2 && templatesAprovados.length === 0}
+            disabled={step === 2 && (templatesAprovados.length === 0 || !todasPreenchidas)}
           >
             Continuar <ChevronRight className="h-4 w-4" />
           </PrimaryBtn>

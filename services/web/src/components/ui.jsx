@@ -101,11 +101,28 @@ export function ProgressBar({ value, total, color = BRAND }) {
 
 /* ----------------------------- WhatsAppBubble ----------------------------- */
 export function WhatsAppBubble({ corpo, botoes = [], nome = "Mariana" }) {
+  // Tokens de prévia: *negrito*, ⟦pendente⟧ (âmbar) e «dinâmico» (esmeralda).
+  // Corpo cru com {{1}}/{{2}} ganha valores demo (comportamento da galeria).
   const texto = corpo
     .replace(/\{\{1\}\}/g, nome)
     .replace(/\{\{2\}\}/g, "#48213")
-    .split(/(\*[^*]+\*)/g)
-    .map((p, i) => (p.startsWith("*") && p.endsWith("*") ? <strong key={i}>{p.slice(1, -1)}</strong> : <span key={i}>{p}</span>));
+    .split(/(\*[^*]+\*|⟦[^⟧]+⟧|«[^»]+»)/g)
+    .map((p, i) => {
+      if (p.startsWith("*") && p.endsWith("*")) return <strong key={i}>{p.slice(1, -1)}</strong>;
+      if (p.startsWith("⟦") && p.endsWith("⟧"))
+        return (
+          <span key={i} className="rounded bg-amber-200/80 px-1 font-medium text-amber-800 dark:bg-amber-500/25 dark:text-amber-200">
+            {p.slice(1, -1)}
+          </span>
+        );
+      if (p.startsWith("«") && p.endsWith("»"))
+        return (
+          <span key={i} className="rounded bg-emerald-200/70 px-1 font-medium text-emerald-800 dark:bg-emerald-500/25 dark:text-emerald-200">
+            {p.slice(1, -1)}
+          </span>
+        );
+      return <span key={i}>{p}</span>;
+    });
   return (
     <div className="rounded-2xl bg-[#E5DDD5] p-4 dark:bg-zinc-800/60">
       <div className="ml-auto max-w-[88%]">
