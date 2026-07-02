@@ -235,7 +235,8 @@ export default function Conversas() {
                         }`}
                       >
                         <p className="whitespace-pre-wrap">
-                          {m.type && m.type !== "text" ? `[${m.type}] ` : ""}
+                          {/* prefixo [tipo] só p/ mídia recebida — outbound já traz "[template] nome" do backend */}
+                          {m.direction === "in" && m.type && m.type !== "text" ? `[${m.type}] ` : ""}
                           {m.body}
                         </p>
                         <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-zinc-500 dark:text-zinc-300">
