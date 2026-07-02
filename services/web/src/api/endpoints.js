@@ -49,7 +49,8 @@ export const listCampaigns = (query = {}) => {
 };
 
 /* ---- Envio avulso / Privacidade (LGPD) ---- */
-export const sendSingle = (dto) => api.post("/messages/send", dto);
+export const sendSingle = (dto) => api.post("/messages/send", dto);   // template p/ 1 número
+export const sendText = (dto) => api.post("/messages/text", dto);     // texto livre (janela 24h)
 export const createDataRequest = (dto) => api.post("/privacy/data-requests", dto);
 
 /* ---- Sessão ---- */

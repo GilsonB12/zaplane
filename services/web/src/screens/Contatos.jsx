@@ -1,8 +1,9 @@
 import React, { useMemo, useRef, useState } from "react";
 import {
-  Search, Filter, Upload, BellOff, Edit2, Trash2,
+  Search, Filter, Upload, BellOff, Edit2, Trash2, MessageSquare,
   ChevronDown, X, ShieldCheck, Check, FileSpreadsheet, FileJson, Info,
 } from "lucide-react";
+import EnviarMensagemModal from "../components/EnviarMensagemModal.jsx";
 import { Card, ConsentChip, PrimaryBtn } from "../components/ui.jsx";
 import { useResource, useMutation } from "../hooks/useResource.js";
 import { toUiContact } from "../api/adapters.js";
@@ -260,6 +261,7 @@ export default function Contatos({ openImport, reloadKey }) {
   const [tag, setTag] = useState("");
   const [consent, setConsent] = useState("");
   const [editing, setEditing] = useState(null);
+  const [mensagemPara, setMensagemPara] = useState(null); // contato do modal de mensagem avulsa
 
   // busca e consent vão server-side; região/tag filtram client-side
   const query = {};
@@ -397,6 +399,14 @@ export default function Contatos({ openImport, reloadKey }) {
                     <td className="px-5 py-3">
                       <div className="flex items-center justify-end gap-1">
                         <button
+                          title="Enviar mensagem"
+                          disabled={c.consent === "optout"}
+                          onClick={() => setMensagemPara(c)}
+                          className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-emerald-50 hover:text-[#0F8C5A] disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-emerald-500/10"
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                        </button>
+                        <button
                           title="Marcar opt-out (descadastrar dos disparos)"
                           disabled={c.consent === "optout"}
                           onClick={() => onOptOut(c)}
@@ -433,6 +443,10 @@ export default function Contatos({ openImport, reloadKey }) {
             </table>
           </div>
         </Card>
+      )}
+
+      {mensagemPara && (
+        <EnviarMensagemModal contato={mensagemPara} onClose={() => setMensagemPara(null)} />
       )}
 
       {editing && (
