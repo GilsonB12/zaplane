@@ -82,11 +82,26 @@ export class WebhooksService {
       message.type ?? null, text || null, JSON.stringify(message),
     );
 
+    const contact = await this.prisma.contact.findFirst({
+      where: { organizationId: orgId, phoneE164: from, deletedAt: null },
+    });
+
+    // captura o nome de perfil do WhatsApp (pushname) — só chega via webhook.
+    // Guardado em attributes.whatsapp_name; {{name}} das campanhas prefere ele.
+    const pushName: string | undefined = value?.contacts?.[0]?.profile?.name;
+    if (contact && pushName) {
+      const attrs = (contact.attributes as Record<string, any>) ?? {};
+      if (attrs.whatsapp_name !== pushName) {
+        await this.prisma.contact.update({
+          where: { id: contact.id },
+          data: { attributes: { ...attrs, whatsapp_name: pushName } },
+        });
+        this.logger.log(`Nome do WhatsApp capturado p/ contato ${contact.id}: ${pushName}`);
+      }
+    }
+
     // opt-out automático por palavra-chave
     if (OPT_OUT_KEYWORDS.includes(text.toLowerCase())) {
-      const contact = await this.prisma.contact.findFirst({
-        where: { organizationId: orgId, phoneE164: from, deletedAt: null },
-      });
       if (contact && !contact.optedOut) {
         await this.prisma.$transaction([
           this.prisma.contact.update({

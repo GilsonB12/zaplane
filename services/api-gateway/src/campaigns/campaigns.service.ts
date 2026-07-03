@@ -206,9 +206,12 @@ export class CampaignsService {
     };
   }
 
-  // suporta placeholders simples: {{name}} → contato.name
+  // suporta placeholders simples: {{name}} → nome de perfil do WhatsApp
+  // (pushname, capturado via webhook) quando conhecido; senão o nome salvo.
   private resolveVar(spec: string, contact: any): string {
-    if (spec === '{{name}}') return contact.name ?? '';
+    if (spec === '{{name}}') {
+      return contact.attributes?.whatsapp_name ?? contact.name ?? '';
+    }
     return spec;
   }
 }
