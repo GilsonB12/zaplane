@@ -75,7 +75,7 @@ export class WebhooksService {
     await this.prisma.$executeRawUnsafe(
       `INSERT INTO inbound_messages
          (organization_id, channel_id, from_phone_e164, wa_message_id, type, body, raw)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+       VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7::jsonb)`,
       orgId, channel!.id, from, message.id ?? null,
       message.type ?? null, text || null, JSON.stringify(message),
     );
@@ -93,7 +93,7 @@ export class WebhooksService {
           }),
           this.prisma.$executeRawUnsafe(
             `INSERT INTO consent_events (organization_id, contact_id, event, source)
-             VALUES ($1,$2,'opted_out','whatsapp_inbound')`,
+             VALUES ($1::uuid,$2::uuid,'opted_out','whatsapp_inbound')`,
             orgId, contact.id,
           ),
         ]);

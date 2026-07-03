@@ -171,7 +171,7 @@ export class CampaignsService {
       return this.prisma.$queryRawUnsafe<any[]>(
         `SELECT c.* FROM contacts c
            JOIN list_contacts lc ON lc.contact_id = c.id
-          WHERE lc.list_id = $1 AND c.organization_id = $2 AND c.deleted_at IS NULL`,
+          WHERE lc.list_id = $1::uuid AND c.organization_id = $2::uuid AND c.deleted_at IS NULL`,
         dto.listId, orgId,
       );
     }
