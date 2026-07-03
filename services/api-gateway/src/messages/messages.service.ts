@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { phoneHash } from '../common/crypto.util';
+import { normalizeBrPhone } from '../common/phone.util';
 
 @Injectable()
 export class MessagesService {
@@ -21,7 +22,7 @@ export class MessagesService {
     if (!template) throw new NotFoundException('Template não encontrado.');
     if (template.status !== 'APPROVED') throw new BadRequestException('Template não aprovado.');
 
-    const e164 = dto.phone.startsWith('+') ? dto.phone : '+' + dto.phone.replace(/\D/g, '');
+    const e164 = normalizeBrPhone(dto.phone.startsWith('+') ? dto.phone : '+' + dto.phone.replace(/\D/g, ''));
     const hash = phoneHash(e164);
     const contact = await this.prisma.contact.findFirst({
       where: { organizationId: orgId, phoneHash: hash, deletedAt: null },
@@ -63,7 +64,7 @@ export class MessagesService {
     });
     if (!channel) throw new NotFoundException('Canal não encontrado.');
 
-    const e164 = dto.phone.startsWith('+') ? dto.phone : '+' + dto.phone.replace(/\D/g, '');
+    const e164 = normalizeBrPhone(dto.phone.startsWith('+') ? dto.phone : '+' + dto.phone.replace(/\D/g, ''));
     const hash = phoneHash(e164);
     const contact = await this.prisma.contact.findFirst({
       where: { organizationId: orgId, phoneHash: hash, deletedAt: null },

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { normalizeBrPhone } from '../common/phone.util';
 
 const OPT_OUT_KEYWORDS = ['parar', 'sair', 'stop', 'cancelar', 'descadastrar', 'unsubscribe'];
 
@@ -61,7 +62,8 @@ export class WebhooksService {
   }
 
   private async handleInbound(message: any, value: any) {
-    const from = '+' + message.from;
+    // wa_id antigo de celular BR vem sem o nono dígito — normaliza adicionando-o
+    const from = normalizeBrPhone('+' + message.from);
     const text: string = (message.text?.body ?? '').trim();
     const phoneNumberId = value?.metadata?.phone_number_id;
 
