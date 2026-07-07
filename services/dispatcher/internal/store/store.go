@@ -89,6 +89,13 @@ func (s *Store) MarkSent(ctx context.Context, id, waMessageID string) error {
 		`UPDATE outbound_messages
 		    SET status='sent', wa_message_id=$2, sent_at=now(), locked_by=NULL
 		  WHERE id=$1`, id, waMessageID)
+	if err == nil {
+		// incrementa o contador da campanha (espelha MarkFailed)
+		_, _ = s.pool.Exec(ctx,
+			`UPDATE campaigns c SET sent_count = sent_count + 1
+			   FROM outbound_messages o
+			  WHERE o.id=$1 AND o.campaign_id = c.id`, id)
+	}
 	return err
 }
 
