@@ -3,12 +3,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { QueryCampaignsDto } from './dto/query-campaigns.dto';
 
-// Tarifas placeholder (centavos) por categoria. TODO: substituir pela tabela
-// oficial da Meta por categoria + código de país do destinatário.
+// Tarifas Meta — Brasil, por mensagem de template ENTREGUE (tabela vigente
+// abr/2026, câmbio US$1=R$5). Valores em centavos de real; cobrança real é da
+// Meta na entrega — isto é a ESTIMATIVA exibida antes do disparo.
+// TODO futuro: tabela por país do destinatário (hoje assume BR).
 const RATE_CENTS: Record<string, number> = {
-  MARKETING: 6,       // ~ R$0,06 (ilustrativo)
-  UTILITY: 2,
-  AUTHENTICATION: 3,
+  MARKETING: 31.25,      // R$ 0,3125
+  UTILITY: 3.4,          // R$ 0,0340 (grátis dentro da janela de 24h)
+  AUTHENTICATION: 3.4,   // R$ 0,0340
 };
 
 @Injectable()
@@ -45,7 +47,8 @@ export class CampaignsService {
     const suppressed = audience.length - eligible.length;
 
     // 3) cria a campanha
-    const costEstimate = BigInt(eligible.length * (RATE_CENTS[template.category] ?? 0));
+    // arredonda p/ centavo inteiro (tarifas têm fração de centavo; BigInt exige inteiro)
+    const costEstimate = BigInt(Math.round(eligible.length * (RATE_CENTS[template.category] ?? 0)));
     const campaign = await this.prisma.campaign.create({
       data: {
         organizationId: orgId, channelId: channel.id, templateId: dto.templateId,
