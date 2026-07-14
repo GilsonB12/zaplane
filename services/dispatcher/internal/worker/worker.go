@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/zaplane/dispatcher/internal/config"
+	"github.com/zaplane/dispatcher/internal/crypto"
 	"github.com/zaplane/dispatcher/internal/ratelimit"
 	"github.com/zaplane/dispatcher/internal/store"
 	"github.com/zaplane/dispatcher/internal/whatsapp"
@@ -22,15 +24,19 @@ type Worker struct {
 
 	chMu  sync.Mutex
 	chche map[string]store.Channel // cache simples de canais
+
+	decFailMu     sync.Mutex
+	decFailLogged map[string]bool // canais cuja falha de decrypt já foi logada (1x)
 }
 
 func New(cfg config.Config, st *store.Store, wa *whatsapp.Client) *Worker {
 	return &Worker{
-		cfg:      cfg,
-		store:    st,
-		wa:       wa,
-		limiters: ratelimit.NewRegistry(cfg.DefaultRatePerSec),
-		chche:    make(map[string]store.Channel),
+		cfg:           cfg,
+		store:         st,
+		wa:            wa,
+		limiters:      ratelimit.NewRegistry(cfg.DefaultRatePerSec),
+		chche:         make(map[string]store.Channel),
+		decFailLogged: make(map[string]bool),
 	}
 }
 
@@ -82,7 +88,7 @@ func (w *Worker) process(ctx context.Context, m store.Message) {
 		return
 	}
 
-	token := w.resolveToken(ch)
+	token := w.resolveToken(ch, m.ChannelID)
 	if token == "" {
 		_ = w.store.MarkFailed(ctx, m.ID, "no_token", "canal sem access token (configure no banco ou WHATSAPP_ACCESS_TOKEN)")
 		return
@@ -105,14 +111,41 @@ func (w *Worker) process(ctx context.Context, m store.Message) {
 	}
 }
 
-// resolveToken: TODO produção → decifrar ch.AccessTokenEnc (AES-256-GCM via KMS).
-// Em dev, usamos o valor como está ou o fallback do .env.
-func (w *Worker) resolveToken(ch store.Channel) string {
+// resolveToken decide qual access token usar para autenticar na Graph API.
+// O valor gravado pelo gateway pode ser: (a) vazio/placeholder → cai no
+// fallback do .env (legado/dev); (b) texto puro (canais antigos, ainda sem
+// cifragem); ou (c) cifrado no formato ivB64:tagB64:cipherB64 (AES-256-GCM —
+// ver internal/crypto e services/api-gateway/src/common/crypto.util.ts).
+// Se houver APP_ENCRYPTION_KEY configurada e o valor "parecer" cifrado
+// (exatamente 2 ':'), tentamos decifrar; falhando, seguimos com o valor cru
+// como texto puro — nunca derruba o envio por causa disso.
+func (w *Worker) resolveToken(ch store.Channel, channelID string) string {
 	t := ch.AccessTokenEnc
 	if t == "" || t == "TOKEN_CIFRADO_AQUI" {
 		return w.cfg.FallbackToken
 	}
+
+	if w.cfg.EncryptionKey != "" && strings.Count(t, ":") == 2 {
+		if plain, err := crypto.Decrypt(t, w.cfg.EncryptionKey); err == nil {
+			return plain
+		} else {
+			w.logDecryptFailureOnce(channelID, err)
+		}
+	}
 	return t
+}
+
+// logDecryptFailureOnce registra a falha de decifragem apenas na primeira vez
+// por canal (evita poluir o log a cada mensagem da fila). Nunca loga o valor
+// cifrado nem a chave — só o erro (que não expõe segredo).
+func (w *Worker) logDecryptFailureOnce(channelID string, err error) {
+	w.decFailMu.Lock()
+	defer w.decFailMu.Unlock()
+	if w.decFailLogged[channelID] {
+		return
+	}
+	w.decFailLogged[channelID] = true
+	log.Printf("[channel %s] falha ao decifrar access token, seguindo como texto puro: %v", channelID, err)
 }
 
 func (w *Worker) channel(ctx context.Context, id string) (store.Channel, error) {
