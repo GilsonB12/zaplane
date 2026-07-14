@@ -27,22 +27,34 @@ export class WebhooksService {
 
   // valida X-Hub-Signature-256 (HMAC do corpo cru) em duas fases:
   // 1) secret global (whatsapp.appSecret) — cobre canais via Embedded Signup (app
-  //    Zaplane) e canais legados sem app_secret_enc próprio.
+  //    Zaplane) e canais legados sem app_secret_enc próprio. Quem assina com esse
+  //    secret só pode ser a Meta: confiança total, sem escopo (scopedPhoneNumberId null).
   // 2) por canal: extrai phone_number_id do body já parseado, busca o canal com
-  //    app_secret_enc preenchido e valida o HMAC contra o secret decifrado dele.
-  async validateSignature(rawBody: Buffer | undefined, signature: string | undefined, body: any): Promise<boolean> {
-    if (!rawBody || !signature) return false;
+  //    app_secret_enc preenchido e valida o HMAC contra o secret decifrado dele. Esse
+  //    secret é do tenant dono do canal, então a autenticação só vale PARA AQUELE
+  //    phone_number_id — retornamos o escopo p/ o process() filtrar os changes.
+  async validateSignature(
+    rawBody: Buffer | undefined,
+    signature: string | undefined,
+    body: any,
+  ): Promise<{ valid: boolean; scopedPhoneNumberId: string | null }> {
+    if (!rawBody || !signature) return { valid: false, scopedPhoneNumberId: null };
 
     const globalSecret = this.config.get<string>('whatsapp.appSecret');
-    if (globalSecret && this.hmacMatches(rawBody, signature, globalSecret)) return true;
+    if (globalSecret && this.hmacMatches(rawBody, signature, globalSecret)) {
+      return { valid: true, scopedPhoneNumberId: null };
+    }
 
     const phoneNumberId = extractPhoneNumberId(body);
-    if (!phoneNumberId) return false;
+    if (!phoneNumberId) return { valid: false, scopedPhoneNumberId: null };
 
     const channelSecret = await this.getChannelSecret(phoneNumberId);
-    if (!channelSecret) return false;
+    if (!channelSecret) return { valid: false, scopedPhoneNumberId: null };
 
-    return this.hmacMatches(rawBody, signature, channelSecret);
+    if (!this.hmacMatches(rawBody, signature, channelSecret)) {
+      return { valid: false, scopedPhoneNumberId: null };
+    }
+    return { valid: true, scopedPhoneNumberId: phoneNumberId };
   }
 
   private hmacMatches(rawBody: Buffer, signature: string, secret: string): boolean {
@@ -75,21 +87,45 @@ export class WebhooksService {
     return secret;
   }
 
-  async process(body: any) {
+  // scopedPhoneNumberId: null quando o payload foi autenticado com o secret global
+  // (Meta) — processa todos os changes. Quando autenticado com o secret de UM canal
+  // (fase 2), só processa changes cujo metadata.phone_number_id seja o mesmo autenticado;
+  // caso contrário um tenant poderia assinar com o próprio secret e "carregar junto" um
+  // change forjado apontando para o phone_number_id de outra organização.
+  async process(body: any, scopedPhoneNumberId: string | null = null) {
+    // resolve o canal do escopo UMA vez (evita repetir a query por change/status)
+    const scopedChannelId = scopedPhoneNumberId
+      ? (await this.prisma.whatsappChannel.findFirst({ where: { phoneNumberId: scopedPhoneNumberId } }))?.id ?? null
+      : null;
+
     const entries = body?.entry ?? [];
     for (const entry of entries) {
       for (const change of entry.changes ?? []) {
         const value = change.value ?? {};
-        for (const status of value.statuses ?? []) await this.handleStatus(status);
+
+        // defense-in-depth: payload autenticado com secret de canal só pode afetar
+        // aquele canal — descarta changes com phone_number_id diferente do autenticado.
+        if (scopedPhoneNumberId && value?.metadata?.phone_number_id !== scopedPhoneNumberId) {
+          this.logger.warn(
+            `Change descartado: payload autenticado para ${scopedPhoneNumberId}, mas change referencia outro phone_number_id.`,
+          );
+          continue;
+        }
+
+        for (const status of value.statuses ?? []) await this.handleStatus(status, scopedChannelId);
         for (const message of value.messages ?? []) await this.handleInbound(message, value);
       }
     }
   }
 
-  private async handleStatus(status: any) {
+  private async handleStatus(status: any, scopedChannelId: string | null = null) {
     // status: sent | delivered | read | failed
     const waId = status.id;
-    const msg = await this.prisma.outboundMessage.findFirst({ where: { waMessageId: waId } });
+    // quando o processamento é escopado a um canal (fase 2), o lookup também é
+    // restrito àquele canal — evita atualizar status/contadores de campanha de outra org.
+    const msg = await this.prisma.outboundMessage.findFirst({
+      where: { waMessageId: waId, ...(scopedChannelId ? { channelId: scopedChannelId } : {}) },
+    });
     if (!msg) return;
 
     const now = new Date();

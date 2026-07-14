@@ -31,10 +31,11 @@ export class WebhooksController {
     @Headers('x-hub-signature-256') signature: string,
     @Body() body: any,
   ) {
-    if (!(await this.webhooks.validateSignature(req.rawBody, signature, body))) {
+    const result = await this.webhooks.validateSignature(req.rawBody, signature, body);
+    if (!result.valid) {
       throw new ForbiddenException('Assinatura inválida.');
     }
-    await this.webhooks.process(body);
+    await this.webhooks.process(body, result.scopedPhoneNumberId);
     return { received: true };
   }
 }
