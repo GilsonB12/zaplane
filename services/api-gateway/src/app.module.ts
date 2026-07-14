@@ -14,6 +14,7 @@ import { MessagesModule } from './messages/messages.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { PrivacyModule } from './privacy/privacy.module';
 import { ConversationsModule } from './conversations/conversations.module';
+import { ChannelsModule } from './channels/channels.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { ConversationsModule } from './conversations/conversations.module';
     WebhooksModule,
     PrivacyModule,
     ConversationsModule,
+    ChannelsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
