@@ -31,7 +31,7 @@ export class WebhooksController {
     @Headers('x-hub-signature-256') signature: string,
     @Body() body: any,
   ) {
-    if (!this.webhooks.validSignature(req.rawBody, signature)) {
+    if (!(await this.webhooks.validateSignature(req.rawBody, signature, body))) {
       throw new ForbiddenException('Assinatura inválida.');
     }
     await this.webhooks.process(body);

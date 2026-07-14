@@ -3,12 +3,19 @@ import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { normalizeBrPhone } from '../common/phone.util';
+import { decrypt } from '../common/crypto.util';
 
 const OPT_OUT_KEYWORDS = ['parar', 'sair', 'stop', 'cancelar', 'descadastrar', 'unsubscribe'];
+
+// cache em memória do secret por canal (evita decifrar a cada evento) — TTL 5 min,
+// invalidação perfeita não é requisito (o TTL cobre rotação/edição do secret).
+const CHANNEL_SECRET_TTL_MS = 5 * 60 * 1000;
 
 @Injectable()
 export class WebhooksService {
   private readonly logger = new Logger('Webhooks');
+  private readonly secretCache = new Map<string, { secret: string; expiresAt: number }>();
+
   constructor(private prisma: PrismaService, private config: ConfigService) {}
 
   // GET: handshake de verificação do webhook
@@ -18,14 +25,54 @@ export class WebhooksService {
     return null;
   }
 
-  // valida X-Hub-Signature-256 (HMAC do corpo cru com o App Secret da Meta)
-  validSignature(rawBody: Buffer | undefined, signature?: string): boolean {
-    const secret = this.config.get<string>('whatsapp.appSecret');
-    if (!secret || !rawBody || !signature) return false;
+  // valida X-Hub-Signature-256 (HMAC do corpo cru) em duas fases:
+  // 1) secret global (whatsapp.appSecret) — cobre canais via Embedded Signup (app
+  //    Zaplane) e canais legados sem app_secret_enc próprio.
+  // 2) por canal: extrai phone_number_id do body já parseado, busca o canal com
+  //    app_secret_enc preenchido e valida o HMAC contra o secret decifrado dele.
+  async validateSignature(rawBody: Buffer | undefined, signature: string | undefined, body: any): Promise<boolean> {
+    if (!rawBody || !signature) return false;
+
+    const globalSecret = this.config.get<string>('whatsapp.appSecret');
+    if (globalSecret && this.hmacMatches(rawBody, signature, globalSecret)) return true;
+
+    const phoneNumberId = extractPhoneNumberId(body);
+    if (!phoneNumberId) return false;
+
+    const channelSecret = await this.getChannelSecret(phoneNumberId);
+    if (!channelSecret) return false;
+
+    return this.hmacMatches(rawBody, signature, channelSecret);
+  }
+
+  private hmacMatches(rawBody: Buffer, signature: string, secret: string): boolean {
     const expected = 'sha256=' + createHmac('sha256', secret).update(rawBody).digest('hex');
     const a = Buffer.from(expected);
     const b = Buffer.from(signature);
     return a.length === b.length && timingSafeEqual(a, b);
+  }
+
+  // busca (com cache de 5 min) o secret decifrado do canal dono do phone_number_id.
+  // NÃO filtra por organização: o webhook é global e phone_number_id é único por canal.
+  private async getChannelSecret(phoneNumberId: string): Promise<string | null> {
+    const cached = this.secretCache.get(phoneNumberId);
+    if (cached && cached.expiresAt > Date.now()) return cached.secret;
+
+    const channel = await this.prisma.whatsappChannel.findFirst({
+      where: { phoneNumberId, appSecretEnc: { not: null } },
+    });
+    if (!channel?.appSecretEnc) return null;
+
+    // app_secret_enc pode estar cifrado (AES-GCM) ou em texto puro (cifragem é TODO no projeto)
+    let secret: string;
+    try {
+      secret = decrypt(channel.appSecretEnc);
+    } catch {
+      secret = channel.appSecretEnc;
+    }
+
+    this.secretCache.set(phoneNumberId, { secret, expiresAt: Date.now() + CHANNEL_SECRET_TTL_MS });
+    return secret;
   }
 
   async process(body: any) {
@@ -118,4 +165,16 @@ export class WebhooksService {
       }
     }
   }
+}
+
+// varre entry[]/changes[] em busca do primeiro phone_number_id válido (pode haver
+// múltiplos entries/changes no mesmo payload de webhook).
+function extractPhoneNumberId(body: any): string | null {
+  for (const entry of body?.entry ?? []) {
+    for (const change of entry?.changes ?? []) {
+      const phoneNumberId = change?.value?.metadata?.phone_number_id;
+      if (phoneNumberId) return phoneNumberId;
+    }
+  }
+  return null;
 }
