@@ -375,11 +375,20 @@ export class ChannelsService {
     };
     // upsert atômico — evita corrida entre a leitura (find) e a escrita (create/update)
     // quando duas requisições reconectam o mesmo phoneNumberId ao mesmo tempo.
-    return this.prisma.whatsappChannel.upsert({
+    const channel = await this.prisma.whatsappChannel.upsert({
       where: { organizationId_phoneNumberId: { organizationId: orgId, phoneNumberId: params.phoneNumberId } },
       create: { organizationId: orgId, ...data },
       update: data,
     });
+
+    // desabilita o canal placeholder de bootstrap (LOCAL_DEV) do org quando um canal
+    // real é conectado — evita que a seleção "primeiro canal ativo" pegue o placeholder.
+    await this.prisma.whatsappChannel.updateMany({
+      where: { organizationId: orgId, phoneNumberId: 'LOCAL_DEV', status: 'active' },
+      data: { status: 'disabled' },
+    });
+
+    return channel;
   }
 
   // nunca retorna accessTokenEnc/appSecretEnc — nem mascarado, simplesmente omitidos (spec §5.1)

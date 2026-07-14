@@ -35,7 +35,7 @@ export class WebhooksController {
     if (!result.valid) {
       throw new ForbiddenException('Assinatura inválida.');
     }
-    await this.webhooks.process(body, result.scopedPhoneNumberId);
+    await this.webhooks.process(body, result.scopedPhoneNumberId, result.scopedChannel);
     return { received: true };
   }
 }

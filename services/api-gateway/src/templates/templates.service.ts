@@ -22,6 +22,8 @@ export class TemplatesService {
   async sync(orgId: string) {
     const channel = await this.prisma.whatsappChannel.findFirst({
       where: { organizationId: orgId, status: 'active' },
+      // determinístico (oldest-first) quando houver mais de um canal ativo
+      orderBy: { createdAt: 'asc' },
     });
     if (!channel || !looksConfigured(channel.wabaId) || !looksConfigured(channel.accessTokenEnc)) {
       return { synced: false, note: 'Sem canal Meta configurado nesta organização.' };
@@ -132,6 +134,8 @@ export class TemplatesService {
   ): Promise<{ id?: string; skipped?: string }> {
     const channel = await this.prisma.whatsappChannel.findFirst({
       where: { organizationId: orgId, status: 'active' },
+      // determinístico (oldest-first) quando houver mais de um canal ativo
+      orderBy: { createdAt: 'asc' },
     });
     if (!channel || !looksConfigured(channel.wabaId) || !looksConfigured(channel.accessTokenEnc)) {
       return { skipped: 'Sem canal Meta configurado; template salvo apenas localmente.' };

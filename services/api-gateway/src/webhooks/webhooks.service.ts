@@ -7,14 +7,23 @@ import { decrypt } from '../common/crypto.util';
 
 const OPT_OUT_KEYWORDS = ['parar', 'sair', 'stop', 'cancelar', 'descadastrar', 'unsubscribe'];
 
-// cache em memória do secret por canal (evita decifrar a cada evento) — TTL 5 min,
-// invalidação perfeita não é requisito (o TTL cobre rotação/edição do secret).
+// cache em memória do secret+canal por phone_number_id (evita decifrar/consultar a
+// cada evento) — TTL 5 min, invalidação perfeita não é requisito (o TTL cobre
+// rotação/edição do secret e troca de dono do número).
 const CHANNEL_SECRET_TTL_MS = 5 * 60 * 1000;
+
+export interface ScopedChannel {
+  id: string;
+  organizationId: string;
+}
 
 @Injectable()
 export class WebhooksService {
   private readonly logger = new Logger('Webhooks');
-  private readonly secretCache = new Map<string, { secret: string; expiresAt: number }>();
+  private readonly secretCache = new Map<
+    string,
+    { secret: string; channel: ScopedChannel; expiresAt: number }
+  >();
 
   constructor(private prisma: PrismaService, private config: ConfigService) {}
 
@@ -37,24 +46,26 @@ export class WebhooksService {
     rawBody: Buffer | undefined,
     signature: string | undefined,
     body: any,
-  ): Promise<{ valid: boolean; scopedPhoneNumberId: string | null }> {
-    if (!rawBody || !signature) return { valid: false, scopedPhoneNumberId: null };
+  ): Promise<{ valid: boolean; scopedPhoneNumberId: string | null; scopedChannel: ScopedChannel | null }> {
+    if (!rawBody || !signature) {
+      return { valid: false, scopedPhoneNumberId: null, scopedChannel: null };
+    }
 
     const globalSecret = this.config.get<string>('whatsapp.appSecret');
     if (globalSecret && this.hmacMatches(rawBody, signature, globalSecret)) {
-      return { valid: true, scopedPhoneNumberId: null };
+      return { valid: true, scopedPhoneNumberId: null, scopedChannel: null };
     }
 
     const phoneNumberId = extractPhoneNumberId(body);
-    if (!phoneNumberId) return { valid: false, scopedPhoneNumberId: null };
+    if (!phoneNumberId) return { valid: false, scopedPhoneNumberId: null, scopedChannel: null };
 
-    const channelSecret = await this.getChannelSecret(phoneNumberId);
-    if (!channelSecret) return { valid: false, scopedPhoneNumberId: null };
+    const found = await this.getChannelForSignature(phoneNumberId);
+    if (!found) return { valid: false, scopedPhoneNumberId: null, scopedChannel: null };
 
-    if (!this.hmacMatches(rawBody, signature, channelSecret)) {
-      return { valid: false, scopedPhoneNumberId: null };
+    if (!this.hmacMatches(rawBody, signature, found.secret)) {
+      return { valid: false, scopedPhoneNumberId: null, scopedChannel: null };
     }
-    return { valid: true, scopedPhoneNumberId: phoneNumberId };
+    return { valid: true, scopedPhoneNumberId: phoneNumberId, scopedChannel: found.channel };
   }
 
   private hmacMatches(rawBody: Buffer, signature: string, secret: string): boolean {
@@ -64,14 +75,22 @@ export class WebhooksService {
     return a.length === b.length && timingSafeEqual(a, b);
   }
 
-  // busca (com cache de 5 min) o secret decifrado do canal dono do phone_number_id.
-  // NÃO filtra por organização: o webhook é global e phone_number_id é único por canal.
-  private async getChannelSecret(phoneNumberId: string): Promise<string | null> {
+  // busca (com cache de 5 min) o secret decifrado + o canal dono do phone_number_id.
+  // NÃO filtra por organização: o webhook é global e phone_number_id é único entre
+  // canais ATIVOS — resolve o mais recente (createdAt desc) para o caso de churn
+  // (um número trocar de dono: o disconnect é soft, então a linha antiga do dono
+  // anterior continua existindo, só com status 'disabled').
+  private async getChannelForSignature(
+    phoneNumberId: string,
+  ): Promise<{ secret: string; channel: ScopedChannel } | null> {
     const cached = this.secretCache.get(phoneNumberId);
-    if (cached && cached.expiresAt > Date.now()) return cached.secret;
+    if (cached && cached.expiresAt > Date.now()) {
+      return { secret: cached.secret, channel: cached.channel };
+    }
 
     const channel = await this.prisma.whatsappChannel.findFirst({
-      where: { phoneNumberId, appSecretEnc: { not: null } },
+      where: { phoneNumberId, appSecretEnc: { not: null }, status: 'active' },
+      orderBy: { createdAt: 'desc' },
     });
     if (!channel?.appSecretEnc) return null;
 
@@ -83,48 +102,64 @@ export class WebhooksService {
       secret = channel.appSecretEnc;
     }
 
-    this.secretCache.set(phoneNumberId, { secret, expiresAt: Date.now() + CHANNEL_SECRET_TTL_MS });
-    return secret;
+    const scopedChannel: ScopedChannel = { id: channel.id, organizationId: channel.organizationId };
+    this.secretCache.set(phoneNumberId, {
+      secret,
+      channel: scopedChannel,
+      expiresAt: Date.now() + CHANNEL_SECRET_TTL_MS,
+    });
+    return { secret, channel: scopedChannel };
   }
 
-  // scopedPhoneNumberId: null quando o payload foi autenticado com o secret global
-  // (Meta) — processa todos os changes. Quando autenticado com o secret de UM canal
-  // (fase 2), só processa changes cujo metadata.phone_number_id seja o mesmo autenticado;
-  // caso contrário um tenant poderia assinar com o próprio secret e "carregar junto" um
-  // change forjado apontando para o phone_number_id de outra organização.
-  async process(body: any, scopedPhoneNumberId: string | null = null) {
-    // resolve o canal do escopo UMA vez (evita repetir a query por change/status)
-    const scopedChannelId = scopedPhoneNumberId
-      ? (await this.prisma.whatsappChannel.findFirst({ where: { phoneNumberId: scopedPhoneNumberId } }))?.id ?? null
-      : null;
-
+  // scopedPhoneNumberId/scopedChannel: null quando o payload foi autenticado com o
+  // secret global (Meta) — processa todos os changes. Quando autenticado com o
+  // secret de UM canal (fase 2), só processa changes cujo metadata.phone_number_id
+  // seja o mesmo autenticado; caso contrário um tenant poderia assinar com o próprio
+  // secret e "carregar junto" um change forjado apontando para o phone_number_id de
+  // outra organização.
+  async process(body: any, scopedPhoneNumberId: string | null = null, scopedChannel: ScopedChannel | null = null) {
     const entries = body?.entry ?? [];
     for (const entry of entries) {
       for (const change of entry.changes ?? []) {
         const value = change.value ?? {};
+        const pnid = value?.metadata?.phone_number_id;
 
         // defense-in-depth: payload autenticado com secret de canal só pode afetar
         // aquele canal — descarta changes com phone_number_id diferente do autenticado.
-        if (scopedPhoneNumberId && value?.metadata?.phone_number_id !== scopedPhoneNumberId) {
+        if (scopedPhoneNumberId && pnid !== scopedPhoneNumberId) {
           this.logger.warn(
             `Change descartado: payload autenticado para ${scopedPhoneNumberId}, mas change referencia outro phone_number_id.`,
           );
           continue;
         }
 
-        for (const status of value.statuses ?? []) await this.handleStatus(status, scopedChannelId);
-        for (const message of value.messages ?? []) await this.handleInbound(message, value);
+        // resolve o canal dono do número (ativo, mais recente) uma vez e propaga —
+        // evita que 3 queries independentes divirjam quando um número troca de dono
+        // (disconnect é soft: a linha antiga do dono anterior continua existindo,
+        // só com status 'disabled', então o findFirst tem que ser status-aware).
+        const channel = scopedChannel && pnid === scopedPhoneNumberId
+          ? scopedChannel
+          : pnid
+            ? await this.prisma.whatsappChannel.findFirst({
+                where: { phoneNumberId: pnid, status: 'active' },
+                orderBy: { createdAt: 'desc' },
+              })
+            : null;
+        if (!channel) continue;
+
+        for (const status of value.statuses ?? []) await this.handleStatus(status, channel.id);
+        for (const message of value.messages ?? []) await this.handleInbound(message, value, channel);
       }
     }
   }
 
-  private async handleStatus(status: any, scopedChannelId: string | null = null) {
+  private async handleStatus(status: any, channelId: string) {
     // status: sent | delivered | read | failed
     const waId = status.id;
-    // quando o processamento é escopado a um canal (fase 2), o lookup também é
-    // restrito àquele canal — evita atualizar status/contadores de campanha de outra org.
+    // o lookup é sempre restrito ao canal resolvido em process() — evita atualizar
+    // status/contadores de campanha de outra organização.
     const msg = await this.prisma.outboundMessage.findFirst({
-      where: { waMessageId: waId, ...(scopedChannelId ? { channelId: scopedChannelId } : {}) },
+      where: { waMessageId: waId, channelId },
     });
     if (!msg) return;
 
@@ -144,24 +179,18 @@ export class WebhooksService {
     }
   }
 
-  private async handleInbound(message: any, value: any) {
+  private async handleInbound(message: any, value: any, channel: ScopedChannel) {
     // wa_id antigo de celular BR vem sem o nono dígito — normaliza adicionando-o
     const from = normalizeBrPhone('+' + message.from);
     const text: string = (message.text?.body ?? '').trim();
-    const phoneNumberId = value?.metadata?.phone_number_id;
-
-    const channel = phoneNumberId
-      ? await this.prisma.whatsappChannel.findFirst({ where: { phoneNumberId } })
-      : null;
-    const orgId = channel?.organizationId;
-    if (!orgId) return;
+    const orgId = channel.organizationId;
 
     // persiste a mensagem recebida (tabela inbound_messages — insert raw)
     await this.prisma.$executeRawUnsafe(
       `INSERT INTO inbound_messages
          (organization_id, channel_id, from_phone_e164, wa_message_id, type, body, raw)
        VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7::jsonb)`,
-      orgId, channel!.id, from, message.id ?? null,
+      orgId, channel.id, from, message.id ?? null,
       message.type ?? null, text || null, JSON.stringify(message),
     );
 

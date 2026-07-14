@@ -14,6 +14,8 @@ export class MessagesService {
       where: dto.channelId
         ? { id: dto.channelId, organizationId: orgId, status: 'active' }
         : { organizationId: orgId, status: 'active' },
+      // determinístico (oldest-first) quando houver mais de um canal ativo
+      orderBy: { createdAt: 'asc' },
     });
     if (!channel) throw new NotFoundException('Canal não encontrado.');
     const template = await this.prisma.template.findFirst({
@@ -61,6 +63,8 @@ export class MessagesService {
       where: dto.channelId
         ? { id: dto.channelId, organizationId: orgId, status: 'active' }
         : { organizationId: orgId, status: 'active' },
+      // determinístico (oldest-first) quando houver mais de um canal ativo
+      orderBy: { createdAt: 'asc' },
     });
     if (!channel) throw new NotFoundException('Canal não encontrado.');
 
