@@ -104,7 +104,21 @@ export class ChannelsService {
       });
     }
 
-    // d. webhook do app do cliente (a Meta faz o handshake GET na hora)
+    // d. webhook do app do cliente (a Meta faz o handshake GET na hora) — exige
+    // WEBHOOK_PUBLIC_URL configurada no gateway, senão a Meta não consegue nos chamar de volta
+    const webhookPublicUrl = this.config.get<string>('webhookPublicUrl');
+    if (!webhookPublicUrl) {
+      etapas.push({
+        passo: 'configurar_webhook',
+        ok: false,
+        detalhe: 'WEBHOOK_PUBLIC_URL não configurada no gateway.',
+      });
+      throw new BadRequestException({
+        ok: false,
+        etapas,
+        message: 'Falha ao configurar o webhook do app na Meta.',
+      });
+    }
     try {
       await this.configureAppWebhook(dto.appId, dto.appSecret, version);
       etapas.push({ passo: 'configurar_webhook', ok: true });
@@ -170,7 +184,7 @@ export class ChannelsService {
   async esExchange(orgId: string, dto: EsExchangeDto) {
     const appId = this.config.get<string>('zaplane.appId');
     const appSecret = this.config.get<string>('zaplane.appSecret');
-    if (!appSecret) {
+    if (!appSecret || !appId) {
       throw new ServiceUnavailableException(
         'Embedded Signup ainda não configurado: falta o App Secret do app Zaplane ' +
           '(ZAPLANE_FB_APP_SECRET). Use a conexão manual enquanto isso.',
@@ -359,13 +373,13 @@ export class ChannelsService {
       connectedVia: params.connectedVia,
       status: 'active',
     };
-    const existing = await this.prisma.whatsappChannel.findFirst({
-      where: { organizationId: orgId, phoneNumberId: params.phoneNumberId },
+    // upsert atômico — evita corrida entre a leitura (find) e a escrita (create/update)
+    // quando duas requisições reconectam o mesmo phoneNumberId ao mesmo tempo.
+    return this.prisma.whatsappChannel.upsert({
+      where: { organizationId_phoneNumberId: { organizationId: orgId, phoneNumberId: params.phoneNumberId } },
+      create: { organizationId: orgId, ...data },
+      update: data,
     });
-    if (existing) {
-      return this.prisma.whatsappChannel.update({ where: { id: existing.id }, data });
-    }
-    return this.prisma.whatsappChannel.create({ data: { organizationId: orgId, ...data } });
   }
 
   // nunca retorna accessTokenEnc/appSecretEnc — nem mascarado, simplesmente omitidos (spec §5.1)

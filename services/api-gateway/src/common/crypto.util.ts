@@ -12,6 +12,12 @@ function key(): Buffer {
   const raw = process.env.APP_ENCRYPTION_KEY || '';
   const buf = Buffer.from(raw, 'base64');
   if (buf.length !== 32) {
+    if (process.env.NODE_ENV === 'production') {
+      // em produção não há fallback seguro: sem chave válida, aborta o processo.
+      throw new Error(
+        'APP_ENCRYPTION_KEY ausente ou inválida (32 bytes base64) — obrigatória em produção.',
+      );
+    }
     // fallback de dev — NÃO usar em produção
     return Buffer.alloc(32, 0);
   }
