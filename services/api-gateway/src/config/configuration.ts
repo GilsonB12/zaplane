@@ -16,4 +16,10 @@ export default () => ({
     appSecret: process.env.WHATSAPP_APP_SECRET || '',
   },
   encryptionKey: process.env.APP_ENCRYPTION_KEY || '',
+  webhookPublicUrl: process.env.WEBHOOK_PUBLIC_URL || '',
+  zaplane: {
+    appId: process.env.ZAPLANE_FB_APP_ID || '',
+    appSecret: process.env.ZAPLANE_FB_APP_SECRET || '',
+    esConfigId: process.env.ZAPLANE_ES_CONFIG_ID || '',
+  },
 });

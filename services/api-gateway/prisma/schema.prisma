@@ -71,6 +71,9 @@ model WhatsappChannel {
   qualityRating   String?  @map("quality_rating")
   throughputLimit Int      @default(80) @map("throughput_limit")
   status          String   @default("active")
+  appId           String?  @map("app_id")
+  appSecretEnc    String?  @map("app_secret_enc")
+  connectedVia    String   @default("manual") @map("connected_via")
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
