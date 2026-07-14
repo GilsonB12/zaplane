@@ -59,5 +59,11 @@ export const sendSingle = (dto) => api.post("/messages/send", dto);   // templat
 export const sendText = (dto) => api.post("/messages/text", dto);     // texto livre (janela 24h)
 export const createDataRequest = (dto) => api.post("/privacy/data-requests", dto);
 
+/* ---- Canais (Conexão Meta) ---- */
+export const listChannels = () => api.get("/channels");
+export const connectChannelManual = (dto) => api.post("/channels/manual", dto);
+export const esExchange = (dto) => api.post("/channels/es/exchange", dto);
+export const disconnectChannel = (id) => api.del(`/channels/${id}`);
+
 /* ---- Sessão ---- */
 export function logout() { setToken(null); }

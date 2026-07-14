@@ -35,8 +35,14 @@ async function request(path, { method = "GET", body, isForm = false } = {}) {
   }
   if (!res.ok) {
     let detail = "";
-    try { detail = JSON.stringify(await res.json()); } catch { detail = await res.text(); }
-    throw new Error(`HTTP ${res.status} — ${detail}`);
+    let json = null;
+    try { json = await res.json(); detail = JSON.stringify(json); } catch { detail = await res.text(); }
+    const err = new Error(`HTTP ${res.status} — ${detail}`);
+    // corpo estruturado (ex.: {ok:false, etapas:[...], message}) — telas que precisam
+    // de mais que uma string (ex.: pipeline de conexão de canal) leem err.body/err.status.
+    err.status = res.status;
+    err.body = json;
+    throw err;
   }
   const ct = res.headers.get("content-type") || "";
   return ct.includes("application/json") ? res.json() : res.text();
