@@ -7,10 +7,14 @@ import react from "@vitejs/plugin-react";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const target = env.VITE_API_PROXY || "http://localhost:3000";
+  // Host extra permitido (ex.: domínio ngrok) para servir o painel via HTTPS —
+  // necessário no teste do popup do Embedded Signup. Configurável e gitignored.
+  const allowedHost = env.VITE_ALLOWED_HOST;
   return {
     plugins: [react()],
     server: {
       port: 5173,
+      allowedHosts: allowedHost ? [allowedHost] : undefined,
       proxy: {
         "/api": { target, changeOrigin: true },
       },
