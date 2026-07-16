@@ -48,6 +48,10 @@ export function toUiCampaign(c) {
     lidas: c.readCount ?? c.read ?? 0,
     falhas: c.failedCount ?? c.failed ?? 0,
     quando: c.createdAt ? new Date(c.createdAt).toLocaleString("pt-BR") : "—",
+    // custo Meta (estimado) e taxa Zaplane (estimada) — dois números de
+    // origens distintas, calculados no backend na criação da campanha.
+    custoEstimadoCents: c.costEstimateCents ?? null,
+    taxaZaplaneEstimadaCents: c.platformFeeEstimateCents ?? null,
   };
 }
 

@@ -65,5 +65,11 @@ export const connectChannelManual = (dto) => api.post("/channels/manual", dto);
 export const esExchange = (dto) => api.post("/channels/es/exchange", dto);
 export const disconnectChannel = (id) => api.del(`/channels/${id}`);
 
+/* ---- Billing ---- */
+export const getBillingSummary = () => api.get("/billing/summary");
+export const getWallet = () => api.get("/billing/wallet");
+export const getSubscription = () => api.get("/billing/subscription");
+export const buyCredits = (amountCents) => api.post("/billing/credits", { amountCents });
+
 /* ---- Sessão ---- */
 export function logout() { setToken(null); }

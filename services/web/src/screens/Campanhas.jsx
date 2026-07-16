@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import {
   MoreVertical, ChevronLeft, ChevronRight, Send, Zap, CheckCheck, FileText,
-  AlertTriangle, BadgeCheck, ShieldCheck, Check, UserRound, X,
+  AlertTriangle, BadgeCheck, ShieldCheck, Check, UserRound, X, Wallet,
 } from "lucide-react";
 import {
   Card, StatusBadge, CategoryTag, ProgressBar, PrimaryBtn, BRAND, TEAL,
@@ -11,9 +11,13 @@ import { useResource, useMutation } from "../hooks/useResource.js";
 import { toUiCampaign, toUiTemplate } from "../api/adapters.js";
 import {
   listCampaigns, getCampaign, createCampaign, cancelCampaign,
-  listLists, listTemplates,
+  listLists, listTemplates, listContacts, getBillingSummary,
 } from "../api/endpoints.js";
 import { extrairVariaveis, contextoDaVariavel, preencherCorpo } from "../utils/template.js";
+import { formatBRL } from "../utils/money.js";
+import { mensagem402 } from "../utils/billing.js";
+
+const TAXA_ZAPLANE_CENTS = 43; // R$ 0,43 por mensagem elegível entregue (ver docs/superpowers/specs/2026-07-16-cobranca-billing.md)
 
 /* ----------------------------- Grid de campanhas ----------------------------- */
 export default function Campanhas({ openCampaign }) {
@@ -117,6 +121,12 @@ export function NovaCampanha({ setScreen, openCampaign }) {
 
   const listsRes = useResource(() => listLists(), []);
   const tplRes = useResource(() => listTemplates(), []);
+  // saldo da carteira (p/ avisar créditos insuficientes ANTES do disparo) e
+  // total de contatos do org (usado só quando o público é "Todos os contatos"
+  // — para uma lista específica não há endpoint de contagem, então a
+  // estimativa fica genérica; o bloqueio real e exato é feito pelo backend).
+  const billingRes = useResource(getBillingSummary, []);
+  const contatosRes = useResource(() => listContacts({ pageSize: 1 }), []);
 
   const listas = listsRes.data ?? [];
   const templatesAprovados = useMemo(
@@ -144,6 +154,23 @@ export function NovaCampanha({ setScreen, openCampaign }) {
     ? `Lista · ${listaAtual.name}`
     : "Todos os contatos da organização";
 
+  // estimativa da taxa Zaplane (elegíveis × R$ 0,43) — só temos contagem real
+  // quando o público é "todos os contatos"; para lista específica, a
+  // contagem exata só é conhecida após a criação da campanha
+  const totalContatosOrg = contatosRes.data?.total ?? null;
+  const estimativaDestinatarios = listId === "" ? totalContatosOrg : null;
+  const taxaZaplaneEstimadaCents = estimativaDestinatarios != null
+    ? estimativaDestinatarios * TAXA_ZAPLANE_CENTS
+    : null;
+  const saldoCents = billingRes.data?.wallet?.balanceCents ?? null;
+  // aviso ANTES do disparo: se já sabemos a estimativa total, comparamos com
+  // ela; senão, checamos se o saldo cobre ao menos 1 mensagem (piso mínimo)
+  const saldoInsuficiente = saldoCents != null && (
+    taxaZaplaneEstimadaCents != null
+      ? saldoCents < taxaZaplaneEstimadaCents
+      : saldoCents < TAXA_ZAPLANE_CENTS
+  );
+
   const steps = ["Público", "Template", "Revisão"];
 
   async function confirmar() {
@@ -162,7 +189,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
       });
       openCampaign(r.campaignId);
     } catch (e) {
-      setErroCriacao(e.message || "Falha ao criar campanha.");
+      setErroCriacao(mensagem402(e) || e.message || "Falha ao criar campanha.");
     }
   }
 
@@ -425,6 +452,44 @@ export function NovaCampanha({ setScreen, openCampaign }) {
                 Todas as mensagens incluem opção de opt-out. Contatos sem base legal serão suprimidos automaticamente.
               </div>
 
+              {/* Custo Meta vs taxa Zaplane — dois números de origens distintas (spec §7) */}
+              <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3.5 dark:border-zinc-800 dark:bg-zinc-800/40">
+                <div className="flex items-center justify-between text-[12px]">
+                  <span className="text-zinc-500 dark:text-zinc-400">Custo Meta (estimado)</span>
+                  <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                    Cobrado direto pela Meta, por mensagem entregue
+                  </span>
+                </div>
+                <div className="mt-1.5 flex items-center justify-between text-[12px]">
+                  <span className="text-zinc-500 dark:text-zinc-400">Taxa Zaplane (estimada)</span>
+                  <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                    {taxaZaplaneEstimadaCents != null
+                      ? `${formatBRL(taxaZaplaneEstimadaCents)} (${estimativaDestinatarios.toLocaleString("pt-BR")} × R$ 0,43)`
+                      : "R$ 0,43 por mensagem elegível — total exato após confirmar"}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex items-center justify-between text-[12px]">
+                  <span className="text-zinc-500 dark:text-zinc-400">Saldo atual de créditos</span>
+                  <span className="inline-flex items-center gap-1 font-medium text-zinc-800 dark:text-zinc-100">
+                    <Wallet className="h-3.5 w-3.5 text-zinc-400" />
+                    {saldoCents != null ? formatBRL(saldoCents) : "—"}
+                  </span>
+                </div>
+              </div>
+
+              {saldoInsuficiente && (
+                <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-[12px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-300">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span className="flex-1">Créditos insuficientes — compre créditos antes de disparar.</span>
+                  <button
+                    onClick={() => setScreen("config")}
+                    className="shrink-0 font-semibold underline underline-offset-2"
+                  >
+                    Ir para billing
+                  </button>
+                </div>
+              )}
+
               {erroCriacao && (
                 <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-[12px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-300">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -625,6 +690,28 @@ export function CampanhaDetalhe({ campaignId, setScreen }) {
           </Card>
         ))}
       </div>
+
+      {(live?.custoEstimadoCents != null || live?.taxaZaplaneEstimadaCents != null) && (
+        <Card className="p-5">
+          <h2 className="mb-3 text-sm font-semibold text-zinc-900 dark:text-white">Custo do disparo</h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="rounded-xl bg-zinc-50 p-4 dark:bg-zinc-800/40">
+              <div className="text-[11px] text-zinc-400">Custo Meta (estimado)</div>
+              <div className="mt-0.5 text-lg font-semibold text-zinc-900 dark:text-white">
+                {formatBRL(live.custoEstimadoCents)}
+              </div>
+              <div className="mt-0.5 text-[11px] text-zinc-400">Cobrado direto pela Meta, por mensagem entregue</div>
+            </div>
+            <div className="rounded-xl bg-zinc-50 p-4 dark:bg-zinc-800/40">
+              <div className="text-[11px] text-zinc-400">Taxa Zaplane (estimada)</div>
+              <div className="mt-0.5 text-lg font-semibold text-zinc-900 dark:text-white">
+                {formatBRL(live.taxaZaplaneEstimadaCents)}
+              </div>
+              <div className="mt-0.5 text-[11px] text-zinc-400">Debitada da sua carteira de créditos</div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="p-5 lg:col-span-2">

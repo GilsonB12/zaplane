@@ -5,6 +5,7 @@ import { useResource, useMutation } from "../hooks/useResource.js";
 import { toUiTemplate } from "../api/adapters.js";
 import { getWindows, listTemplates, sendSingle, sendText } from "../api/endpoints.js";
 import { extrairVariaveis, preencherCorpo } from "../utils/template.js";
+import { mensagem402 } from "../utils/billing.js";
 
 const soDigitos = (v) => String(v ?? "").replace(/\D/g, "");
 
@@ -84,7 +85,7 @@ export default function EnviarMensagemModal({ contato, onClose }) {
           : "Mensagem enfileirada. Ela só será entregue se o contato falou com você nas últimas 24h.",
       );
     } catch (e) {
-      setErro(e.message || "Falha ao enviar.");
+      setErro(mensagem402(e) || e.message || "Falha ao enviar.");
     }
   }
 
