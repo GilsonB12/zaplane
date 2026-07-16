@@ -17,6 +17,10 @@ export default () => ({
   },
   encryptionKey: process.env.APP_ENCRYPTION_KEY || '',
   webhookPublicUrl: process.env.WEBHOOK_PUBLIC_URL || '',
+  billing: {
+    // preço fixo por mensagem efetivamente tarifada pela Meta (R$0,43 = 43 centavos)
+    usagePriceCents: parseInt(process.env.BILLING_USAGE_PRICE_CENTS || '43', 10),
+  },
   zaplane: {
     appId: process.env.ZAPLANE_FB_APP_ID || '',
     appSecret: process.env.ZAPLANE_FB_APP_SECRET || '',

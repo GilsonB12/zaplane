@@ -147,13 +147,13 @@ export class WebhooksService {
             : null;
         if (!channel) continue;
 
-        for (const status of value.statuses ?? []) await this.handleStatus(status, channel.id);
+        for (const status of value.statuses ?? []) await this.handleStatus(status, channel.id, channel.organizationId);
         for (const message of value.messages ?? []) await this.handleInbound(message, value, channel);
       }
     }
   }
 
-  private async handleStatus(status: any, channelId: string) {
+  private async handleStatus(status: any, channelId: string, organizationId: string) {
     // status: sent | delivered | read | failed
     const waId = status.id;
     // o lookup é sempre restrito ao canal resolvido em process() — evita atualizar
@@ -177,6 +177,96 @@ export class WebhooksService {
     if (msg.campaignId && Object.keys(counter).length) {
       await this.prisma.campaign.update({ where: { id: msg.campaignId }, data: counter });
     }
+
+    // --- Medição de cobrança (billing) ------------------------------------
+    // A Meta reporta o custo real da mensagem no campo `pricing` do webhook
+    // de status (tipicamente junto do evento "delivered"); nem todo evento
+    // de status carrega `pricing` — só agimos quando presente. O guard
+    // billing_recorded_at evita reprocessar reenvios do mesmo webhook.
+    const pricing = status.pricing;
+    if (pricing && typeof pricing.billable === 'boolean' && !msg.billingRecordedAt) {
+      await this.recordPricing(pricing, msg, organizationId);
+    }
+  }
+
+  // Grava billable/pricing_category/pricing_model em outbound_messages e,
+  // quando a Meta efetivamente tarifou a mensagem (billable=true), debita o
+  // preço fixo (BILLING_USAGE_PRICE_CENTS) da carteira pré-paga da
+  // organização. Idempotente em duas camadas: (1) o caller só chama aqui se
+  // billing_recorded_at ainda for NULL; (2) dentro da transação, o UNIQUE
+  // parcial (organization_id, wa_message_id) WHERE kind='debit' garante que
+  // nem uma corrida entre reentregas concorrentes do webhook da Meta debite
+  // duas vezes a mesma mensagem.
+  private async recordPricing(
+    pricing: { billable: boolean; category?: string; pricing_model?: string },
+    msg: { id: string; waMessageId: string | null },
+    organizationId: string,
+  ) {
+    const category = pricing.category ?? null;
+    const pricingModel = pricing.pricing_model ?? null;
+
+    if (!pricing.billable) {
+      // Meta não tarifou esta mensagem — não há débito, só registramos o
+      // resultado e travamos billing_recorded_at p/ não reprocessar.
+      await this.prisma.outboundMessage.update({
+        where: { id: msg.id },
+        data: { billable: false, pricingCategory: category, pricingModel, billingRecordedAt: new Date() },
+      });
+      return;
+    }
+
+    const priceCents = this.config.get<number>('billing.usagePriceCents') ?? 43;
+
+    if (!msg.waMessageId) {
+      // sem wa_message_id não há chave de idempotência confiável para o
+      // débito (não deveria ocorrer — todo status da Meta traz `id`).
+      // Por segurança gravamos o pricing e não debitamos, evitando um
+      // débito não rastreável.
+      this.logger.warn('Status com pricing.billable=true sem wa_message_id — débito ignorado.');
+      await this.prisma.outboundMessage.update({
+        where: { id: msg.id },
+        data: { billable: true, pricingCategory: category, pricingModel, billingRecordedAt: new Date() },
+      });
+      return;
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      // trava a linha da carteira da organização (se existir) — evita corrida
+      // entre débitos concorrentes calculando balance_after_cents errado.
+      const walletRows = await tx.$queryRawUnsafe<Array<{ balance_cents: number }>>(
+        'SELECT balance_cents FROM wallets WHERE organization_id = $1::uuid FOR UPDATE',
+        organizationId,
+      );
+      const hasWallet = walletRows.length > 0;
+      const currentBalance = walletRows[0]?.balance_cents ?? 0;
+      // CHECK(balance_cents >= 0): nunca deixamos o saldo ir negativo
+      const newBalance = Math.max(currentBalance - priceCents, 0);
+
+      const inserted = await tx.$queryRawUnsafe<Array<{ id: bigint }>>(
+        `INSERT INTO wallet_transactions
+           (organization_id, kind, amount_cents, balance_after_cents, reason, outbound_message_id, wa_message_id, metadata)
+         VALUES ($1::uuid, 'debit', $2::int, $3::int, 'message', $4::uuid, $5, '{}'::jsonb)
+         ON CONFLICT (organization_id, wa_message_id) WHERE kind = 'debit' DO NOTHING
+         RETURNING id`,
+        organizationId, priceCents, newBalance, msg.id, msg.waMessageId,
+      );
+
+      if (inserted.length > 0 && hasWallet) {
+        await tx.$executeRawUnsafe(
+          'UPDATE wallets SET balance_cents = $2::int WHERE organization_id = $1::uuid',
+          organizationId, newBalance,
+        );
+      } else if (inserted.length > 0 && !hasWallet) {
+        // carteira ainda não provisionada para a org — registra o débito no
+        // livro-razão (histórico correto), mas não há saldo para atualizar.
+        this.logger.warn('Débito registrado sem carteira provisionada para a organização.');
+      }
+
+      await tx.outboundMessage.update({
+        where: { id: msg.id },
+        data: { billable: true, pricingCategory: category, pricingModel, billingRecordedAt: new Date() },
+      });
+    });
   }
 
   private async handleInbound(message: any, value: any, channel: ScopedChannel) {
