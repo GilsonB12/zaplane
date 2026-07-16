@@ -1,3 +1,12 @@
+// Placeholder documentado no .env.example para ASAAS_WEBHOOK_TOKEN —
+// deliberadamente óbvio de não ser um segredo real. asaas.provider.ts recusa
+// iniciar em produção (NODE_ENV=production) se ASAAS_WEBHOOK_TOKEN estiver
+// vazio OU IGUAL a este valor exato (ver Fix C1 do review B3,
+// .superpowers/sdd/b3-report.md): sem essa checagem, um deploy que esquecesse
+// de trocar o placeholder aceitaria qualquer webhook forjado com esse valor
+// público, permitindo creditar dinheiro em qualquer organização.
+export const ASAAS_WEBHOOK_TOKEN_PLACEHOLDER = 'TROQUE-ESTE-VALOR-ISTO-NAO-E-UM-SEGREDO';
+
 export default () => ({
   env: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT || '3000', 10),

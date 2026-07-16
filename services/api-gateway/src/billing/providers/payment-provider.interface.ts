@@ -54,6 +54,22 @@ export interface CreateChargeResult {
   dueDate: string;
 }
 
+/** Resultado de uma re-consulta direta ao provedor (GET /payments/{id}) — a
+ *  defesa real do Fix C1 (review B3) contra webhook forjado/token vazado:
+ *  nunca decidimos crédito/ativação só com o corpo do webhook, sempre
+ *  re-verificamos aqui antes. */
+export interface PaymentStatusResult {
+  id: string;
+  /** status bruto do provedor (Asaas: 'PENDING', 'CONFIRMED', 'RECEIVED',
+   *  'OVERDUE', 'REFUNDED' etc.) — só CONFIRMED/RECEIVED autorizam mover
+   *  dinheiro. */
+  status: string;
+  amountCents: number;
+  providerSubscriptionId: string | null;
+  orgId: string | null;
+  customerId: string | null;
+}
+
 export type NormalizedEventType =
   | 'payment_confirmed'
   | 'payment_overdue'
@@ -81,6 +97,10 @@ export interface PaymentProviderAdapter {
   createCustomer(org: OrgCustomerInput): Promise<CreateCustomerResult>;
   createSubscription(input: CreateSubscriptionInput): Promise<CreateSubscriptionResult>;
   createCharge(input: CreateChargeInput): Promise<CreateChargeResult>;
+  /** Re-consulta o pagamento diretamente no provedor (nunca confiar cegamente
+   *  no corpo do webhook) — ver PaymentStatusResult. Retorna null se o
+   *  provedor responder 404 (pagamento inexistente). */
+  getPayment(providerPaymentId: string): Promise<PaymentStatusResult | null>;
   /** Valida a autenticidade do webhook (ex.: header de token do Asaas) —
    *  comparação em tempo constante (timingSafeEqual). */
   verifyWebhook(headers: Record<string, string | string[] | undefined>): boolean;

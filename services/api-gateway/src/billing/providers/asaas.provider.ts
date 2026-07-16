@@ -2,6 +2,7 @@ import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'crypto';
 import axios, { AxiosInstance } from 'axios';
+import { ASAAS_WEBHOOK_TOKEN_PLACEHOLDER } from '../../config/configuration';
 import {
   CreateChargeInput,
   CreateChargeResult,
@@ -12,6 +13,7 @@ import {
   NormalizedEventType,
   OrgCustomerInput,
   PaymentProviderAdapter,
+  PaymentStatusResult,
 } from './payment-provider.interface';
 
 // CPF de teste válido (formato correto p/ passar a validação de dígito
@@ -66,6 +68,8 @@ export class AsaasProvider implements PaymentProviderAdapter {
     const apiKey = this.config.get<string>('billing.asaas.apiKey');
     this.webhookToken = this.config.get<string>('billing.asaas.webhookToken') ?? '';
 
+    this.assertWebhookTokenIsSafe();
+
     this.http = axios.create({
       baseURL,
       timeout: 15_000,
@@ -74,6 +78,31 @@ export class AsaasProvider implements PaymentProviderAdapter {
         'Content-Type': 'application/json',
       },
     });
+  }
+
+  // Fix C1 (review B3, parte 1 — "fail closed on weak token"): um
+  // ASAAS_WEBHOOK_TOKEN vazio ou igual ao placeholder documentado no
+  // .env.example tornaria a validação do webhook (verifyWebhook) inútil —
+  // qualquer request com esse valor conhecido/óbvio passaria. Em produção,
+  // recusamos subir a aplicação; em dev, apenas avisamos alto (o re-fetch do
+  // Fix C1 parte 2 ainda protege o dinheiro mesmo com token fraco).
+  private assertWebhookTokenIsSafe(): void {
+    const isEmpty = this.webhookToken.length === 0;
+    const isPlaceholder = this.webhookToken === ASAAS_WEBHOOK_TOKEN_PLACEHOLDER;
+    if (!isEmpty && !isPlaceholder) return;
+
+    const nodeEnv = this.config.get<string>('env');
+    const reason = isEmpty ? 'está vazio' : 'é igual ao placeholder público do .env.example';
+    const message =
+      `[SEGURANÇA] ASAAS_WEBHOOK_TOKEN ${reason}. Um webhook forjado (token adivinhado/vazado) ` +
+      `poderia tentar creditar dinheiro em qualquer organização. Defina um valor forte e único.`;
+
+    if (nodeEnv === 'production') {
+      throw new Error(`${message} Recusando iniciar em produção.`);
+    }
+    this.logger.warn(
+      `${message} Permitido em ambiente "${nodeEnv ?? 'development'}" apenas para desenvolvimento — NUNCA suba assim para produção.`,
+    );
   }
 
   async createCustomer(org: OrgCustomerInput): Promise<CreateCustomerResult> {
@@ -130,6 +159,37 @@ export class AsaasProvider implements PaymentProviderAdapter {
       paymentUrl: data.invoiceUrl ?? null,
       dueDate,
     };
+  }
+
+  // Fix C1 (review B3, parte 2 — a defesa real): re-consulta o pagamento
+  // diretamente na API do Asaas em vez de confiar no corpo do webhook. Um
+  // evento PAYMENT_CONFIRMED forjado (mesmo com o token de webhook correto,
+  // vazado ou fraco) referenciando uma cobrança que o Asaas ainda reporta
+  // como PENDING não passa por aqui como "confirmado". Retorna null em 404
+  // (pagamento inexistente) — o chamador trata isso como "não verificado".
+  async getPayment(providerPaymentId: string): Promise<PaymentStatusResult | null> {
+    try {
+      const { data } = await this.http.get(`/payments/${encodeURIComponent(providerPaymentId)}`);
+      return {
+        id: data.id,
+        status: data.status,
+        amountCents: typeof data.value === 'number' ? reaisToCents(data.value) : 0,
+        providerSubscriptionId: data.subscription ?? null,
+        orgId: data.externalReference ?? null,
+        customerId: data.customer ?? null,
+      };
+    } catch (err) {
+      const anyErr = err as { response?: { status?: number } };
+      if (anyErr?.response?.status === 404) return null;
+      this.logSanitizedError('getPayment', err);
+      throw new HttpException(
+        {
+          code: 'PAYMENT_PROVIDER_ERROR',
+          message: 'Falha ao comunicar com o provedor de pagamento (getPayment).',
+        },
+        502,
+      );
+    }
   }
 
   verifyWebhook(headers: Record<string, string | string[] | undefined>): boolean {
