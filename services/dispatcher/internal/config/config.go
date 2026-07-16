@@ -7,12 +7,13 @@ import (
 )
 
 type Config struct {
-	DatabaseURL      string
-	GraphVersion     string
-	FallbackToken    string
-	Concurrency      int
-	BatchSize        int
-	PollInterval     time.Duration
+	DatabaseURL       string
+	GraphVersion      string
+	FallbackToken     string
+	EncryptionKey     string
+	Concurrency       int
+	BatchSize         int
+	PollInterval      time.Duration
 	DefaultRatePerSec int
 }
 
@@ -21,6 +22,7 @@ func Load() Config {
 		DatabaseURL:       env("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/zaplane"),
 		GraphVersion:      env("WHATSAPP_GRAPH_API_VERSION", "v21.0"),
 		FallbackToken:     env("WHATSAPP_ACCESS_TOKEN", ""),
+		EncryptionKey:     env("APP_ENCRYPTION_KEY", ""),
 		Concurrency:       envInt("WORKER_CONCURRENCY", 4),
 		BatchSize:         envInt("BATCH_SIZE", 50),
 		PollInterval:      time.Duration(envInt("POLL_INTERVAL_MS", 750)) * time.Millisecond,

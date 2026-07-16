@@ -21,8 +21,8 @@ export class ListsService {
     for (const cid of contactIds) {
       await this.prisma.$executeRawUnsafe(
         `INSERT INTO list_contacts (list_id, contact_id)
-         SELECT $1, $2 WHERE EXISTS (
-           SELECT 1 FROM contacts WHERE id = $2 AND organization_id = $3
+         SELECT $1::uuid, $2::uuid WHERE EXISTS (
+           SELECT 1 FROM contacts WHERE id = $2::uuid AND organization_id = $3::uuid
          ) ON CONFLICT DO NOTHING`,
         listId, cid, orgId,
       );

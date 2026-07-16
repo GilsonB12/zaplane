@@ -1,13 +1,21 @@
 // Cliente HTTP do painel Zaplane → API Gateway (NestJS).
-// O token JWT fica em memória (sem localStorage). Em dev, a base é /api/v1
-// e o Vite faz proxy para http://localhost:3000.
+// O token JWT é persistido em localStorage. Em dev, a base é /api/v1 (Vite faz proxy p/ :3000).
 
 const BASE = import.meta.env.VITE_API_URL || "/api/v1";
+const TOKEN_KEY = "zaplane_token";
 
-let token = null;
-export function setToken(t) { token = t; }
+let token = localStorage.getItem(TOKEN_KEY);
+export function setToken(t) {
+  token = t || null;
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+  else localStorage.removeItem(TOKEN_KEY);
+}
 export function getToken() { return token; }
 export function isAuthenticated() { return !!token; }
+
+// O AuthContext registra aqui o que fazer quando a API responde 401.
+let onUnauthorized = null;
+export function setUnauthorizedHandler(fn) { onUnauthorized = fn; }
 
 async function request(path, { method = "GET", body, isForm = false } = {}) {
   const headers = {};
@@ -20,10 +28,21 @@ async function request(path, { method = "GET", body, isForm = false } = {}) {
   }
 
   const res = await fetch(`${BASE}${path}`, { method, headers, body: payload });
+
+  if (res.status === 401) {
+    setToken(null);
+    if (onUnauthorized) onUnauthorized();
+  }
   if (!res.ok) {
     let detail = "";
-    try { detail = JSON.stringify(await res.json()); } catch { detail = await res.text(); }
-    throw new Error(`HTTP ${res.status} — ${detail}`);
+    let json = null;
+    try { json = await res.json(); detail = JSON.stringify(json); } catch { detail = await res.text(); }
+    const err = new Error(`HTTP ${res.status} — ${detail}`);
+    // corpo estruturado (ex.: {ok:false, etapas:[...], message}) — telas que precisam
+    // de mais que uma string (ex.: pipeline de conexão de canal) leem err.body/err.status.
+    err.status = res.status;
+    err.body = json;
+    throw err;
   }
   const ct = res.headers.get("content-type") || "";
   return ct.includes("application/json") ? res.json() : res.text();

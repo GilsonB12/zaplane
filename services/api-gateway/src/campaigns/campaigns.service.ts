@@ -1,22 +1,31 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { BillingService } from '../billing/billing.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
+import { QueryCampaignsDto } from './dto/query-campaigns.dto';
 
-// Tarifas placeholder (centavos) por categoria. TODO: substituir pela tabela
-// oficial da Meta por categoria + código de país do destinatário.
+// Tarifas Meta — Brasil, por mensagem de template ENTREGUE (tabela vigente
+// abr/2026, câmbio US$1=R$5). Valores em centavos de real; cobrança real é da
+// Meta na entrega — isto é a ESTIMATIVA exibida antes do disparo.
+// TODO futuro: tabela por país do destinatário (hoje assume BR).
 const RATE_CENTS: Record<string, number> = {
-  MARKETING: 6,       // ~ R$0,06 (ilustrativo)
-  UTILITY: 2,
-  AUTHENTICATION: 3,
+  MARKETING: 31.25,      // R$ 0,3125
+  UTILITY: 3.4,          // R$ 0,0340 (grátis dentro da janela de 24h)
+  AUTHENTICATION: 3.4,   // R$ 0,0340
 };
 
 @Injectable()
 export class CampaignsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private billing: BillingService) {}
 
   async create(orgId: string, userId: string, dto: CreateCampaignDto) {
+    // fallback: usa o canal ativo do org quando channelId não é informado
     const channel = await this.prisma.whatsappChannel.findFirst({
-      where: { id: dto.channelId, organizationId: orgId, status: 'active' },
+      where: dto.channelId
+        ? { id: dto.channelId, organizationId: orgId, status: 'active' }
+        : { organizationId: orgId, status: 'active' },
+      // determinístico (oldest-first) quando houver mais de um canal ativo
+      orderBy: { createdAt: 'asc' },
     });
     if (!channel) throw new NotFoundException('Canal WhatsApp não encontrado.');
 
@@ -40,27 +49,38 @@ export class CampaignsService {
     });
     const suppressed = audience.length - eligible.length;
 
-    // 3) cria a campanha
-    const costEstimate = BigInt(eligible.length * (RATE_CENTS[template.category] ?? 0));
+    // 3) estimativa do custo Meta (exibida antes do disparo) + estimativa da
+    // taxa Zaplane (elegíveis x preço fixo por mensagem tarifada) — dois
+    // números de origens distintas, ver spec §5 (B2).
+    // arredonda p/ centavo inteiro (tarifas têm fração de centavo; BigInt exige inteiro)
+    const costEstimate = BigInt(Math.round(eligible.length * (RATE_CENTS[template.category] ?? 0)));
+    const platformFeeEstimate = BigInt(eligible.length * this.billing.usagePriceCents);
+
+    // 4) pré-checagem de saldo: bloqueia ANTES de criar a campanha/enfileirar
+    // se a carteira não cobre o teto estimado (débito real ocorre só quando
+    // a Meta confirma billable=true, via webhook).
+    await this.billing.assertBalanceFor(orgId, Number(platformFeeEstimate));
+
+    // 5) cria a campanha
     const campaign = await this.prisma.campaign.create({
       data: {
-        organizationId: orgId, channelId: dto.channelId, templateId: dto.templateId,
+        organizationId: orgId, channelId: channel.id, templateId: dto.templateId,
         name: dto.name, listId: dto.listId ?? null,
         audienceRule: (dto.audienceRule as any) ?? undefined,
         templateParams: (dto.templateParams as any) ?? {},
         status: dto.scheduledAt ? 'scheduled' : 'queuing',
         scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
         totalRecipients: eligible.length, suppressedCount: suppressed,
-        costEstimateCents: costEstimate, createdBy: userId,
+        costEstimateCents: costEstimate, platformFeeEstimateCents: platformFeeEstimate, createdBy: userId,
       },
     });
 
-    // 4) enfileira (uma linha por destinatário em outbound_messages)
+    // 6) enfileira (uma linha por destinatário em outbound_messages)
     if (eligible.length > 0 && !dto.scheduledAt) {
       const rows = eligible.map((c) => ({
         organizationId: orgId,
         campaignId: campaign.id,
-        channelId: dto.channelId,
+        channelId: channel.id,
         contactId: c.id,
         toPhoneE164: c.phoneE164,
         payload: this.buildTemplatePayload(c, template, dto.templateParams),
@@ -78,16 +98,76 @@ export class CampaignsService {
       totalRecipients: eligible.length,
       suppressed,
       costEstimateCents: Number(costEstimate),
+      platformFeeEstimateCents: Number(platformFeeEstimate),
       status: dto.scheduledAt ? 'scheduled' : 'sending',
     };
   }
 
+  async list(orgId: string, q: QueryCampaignsDto) {
+    const page = q.page ?? 1;
+    const pageSize = Math.min(q.pageSize ?? 20, 100);
+    const where: any = { organizationId: orgId };
+    if (q.status) where.status = q.status;
+
+    const [rows, total] = await Promise.all([
+      this.prisma.campaign.findMany({
+        where,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          template: { select: { name: true, category: true } },
+          channel: { select: { label: true } },
+        },
+      }),
+      this.prisma.campaign.count({ where }),
+    ]);
+
+    const items = rows.map((c) => ({
+      id: c.id,
+      name: c.name,
+      status: c.status,
+      template: c.template,
+      channel: c.channel,
+      totalRecipients: c.totalRecipients,
+      suppressedCount: c.suppressedCount,
+      sentCount: c.sentCount,
+      deliveredCount: c.deliveredCount,
+      readCount: c.readCount,
+      failedCount: c.failedCount,
+      costEstimateCents: c.costEstimateCents != null ? Number(c.costEstimateCents) : null,
+      platformFeeEstimateCents: c.platformFeeEstimateCents != null ? Number(c.platformFeeEstimateCents) : null,
+      scheduledAt: c.scheduledAt,
+      createdAt: c.createdAt,
+    }));
+    return { items, total, page, pageSize };
+  }
+
   async progress(orgId: string, id: string) {
-    const c = await this.prisma.campaign.findFirst({ where: { id, organizationId: orgId } });
+    const c = await this.prisma.campaign.findFirst({
+      where: { id, organizationId: orgId },
+      include: {
+        template: { select: { name: true, category: true } },
+        channel: { select: { label: true } },
+      },
+    });
     if (!c) throw new NotFoundException('Campanha não encontrada.');
     return {
-      id: c.id, status: c.status, total: c.totalRecipients, suppressed: c.suppressedCount,
-      sent: c.sentCount, delivered: c.deliveredCount, read: c.readCount, failed: c.failedCount,
+      id: c.id,
+      name: c.name,
+      status: c.status,
+      template: c.template,
+      channel: c.channel,
+      total: c.totalRecipients,
+      suppressed: c.suppressedCount,
+      sent: c.sentCount,
+      delivered: c.deliveredCount,
+      read: c.readCount,
+      failed: c.failedCount,
+      costEstimateCents: c.costEstimateCents != null ? Number(c.costEstimateCents) : null,
+      platformFeeEstimateCents: c.platformFeeEstimateCents != null ? Number(c.platformFeeEstimateCents) : null,
+      createdAt: c.createdAt,
+      scheduledAt: c.scheduledAt,
     };
   }
 
@@ -110,7 +190,7 @@ export class CampaignsService {
       return this.prisma.$queryRawUnsafe<any[]>(
         `SELECT c.* FROM contacts c
            JOIN list_contacts lc ON lc.contact_id = c.id
-          WHERE lc.list_id = $1 AND c.organization_id = $2 AND c.deleted_at IS NULL`,
+          WHERE lc.list_id = $1::uuid AND c.organization_id = $2::uuid AND c.deleted_at IS NULL`,
         dto.listId, orgId,
       );
     }
@@ -145,9 +225,12 @@ export class CampaignsService {
     };
   }
 
-  // suporta placeholders simples: {{name}} → contato.name
+  // suporta placeholders simples: {{name}} → nome de perfil do WhatsApp
+  // (pushname, capturado via webhook) quando conhecido; senão o nome salvo.
   private resolveVar(spec: string, contact: any): string {
-    if (spec === '{{name}}') return contact.name ?? '';
+    if (spec === '{{name}}') {
+      return contact.attributes?.whatsapp_name ?? contact.name ?? '';
+    }
     return spec;
   }
 }

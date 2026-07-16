@@ -39,6 +39,37 @@ export class AuthService {
           role: 'owner',
         },
       });
+      // cria canal placeholder para que a org possa enfileirar localmente
+      // sem credenciais reais da Meta (dispensado por looksConfigured)
+      await tx.whatsappChannel.create({
+        data: {
+          organizationId: org.id,
+          label: 'Canal padrão',
+          phoneNumberId: 'LOCAL_DEV',
+          wabaId: 'LOCAL_DEV',
+          accessTokenEnc: 'LOCAL_DEV',
+          status: 'active',
+        },
+      });
+      // cria a carteira pré-paga (saldo 0) da org — sem isso, o débito de
+      // billing (webhooks.service.ts) cai no ramo "sem carteira provisionada"
+      // e nunca desconta nada (ver review B1, Fix 2).
+      await tx.wallet.create({ data: { organizationId: org.id, balanceCents: 0 } });
+      // cria a assinatura da org já 'inactive' (sem trial — precisa assinar
+      // para liberar campanhas/envios via SubscriptionGuard). Orgs que já
+      // existiam antes da B2 foram "grandfathered" como 'active' pela
+      // migração 005 (backfill); orgs novas passam sempre por aqui.
+      // Fix M2 (review final): preço vem do config (mesma fonte usada por
+      // BillingService.subscriptionPriceCents), não mais hardcoded — permite
+      // ajustar via BILLING_SUBSCRIPTION_PRICE_CENTS sem tocar código.
+      await tx.subscription.create({
+        data: {
+          organizationId: org.id,
+          status: 'inactive',
+          provider: 'asaas',
+          priceCents: this.config.get<number>('billing.subscriptionPriceCents') ?? 13500,
+        },
+      });
       return { org, user };
     });
 

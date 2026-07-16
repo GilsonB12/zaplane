@@ -36,13 +36,40 @@ export function importContacts(file, consentStatus, consentSource, defaultCountr
 /* ---- Listas / Templates ---- */
 export const listLists = () => api.get("/lists");
 export const listTemplates = () => api.get("/templates");
+export const createTemplate = (dto) => api.post("/templates", dto);
+export const syncTemplates = () => api.post("/templates/sync"); // puxa status/categoria da Meta
 
 /* ---- Campanhas ---- */
 export const createCampaign = (dto) => api.post("/campaigns", dto);
 export const getCampaign = (id) => api.get(`/campaigns/${id}`);
 export const cancelCampaign = (id) => api.post(`/campaigns/${id}/cancel`);
-// NOTA: o gateway ainda não tem "GET /campaigns" (listar todas). Ver web/README.md.
+export const listCampaigns = (query = {}) => {
+  const qs = new URLSearchParams(query).toString();
+  return api.get(`/campaigns${qs ? `?${qs}` : ""}`);
+};
+
+/* ---- Conversas (inbox 1:1) ---- */
+export const listConversations = () => api.get("/conversations");
+export const getConversation = (phone) =>
+  api.get(`/conversations/${encodeURIComponent(String(phone).replace(/\D/g, ""))}/messages`);
+export const getWindows = () => api.get("/conversations/windows");
 
 /* ---- Envio avulso / Privacidade (LGPD) ---- */
-export const sendSingle = (dto) => api.post("/messages/send", dto);
+export const sendSingle = (dto) => api.post("/messages/send", dto);   // template p/ 1 número
+export const sendText = (dto) => api.post("/messages/text", dto);     // texto livre (janela 24h)
 export const createDataRequest = (dto) => api.post("/privacy/data-requests", dto);
+
+/* ---- Canais (Conexão Meta) ---- */
+export const listChannels = () => api.get("/channels");
+export const connectChannelManual = (dto) => api.post("/channels/manual", dto);
+export const esExchange = (dto) => api.post("/channels/es/exchange", dto);
+export const disconnectChannel = (id) => api.del(`/channels/${id}`);
+
+/* ---- Billing ---- */
+export const getBillingSummary = () => api.get("/billing/summary");
+export const getWallet = () => api.get("/billing/wallet");
+export const getSubscription = () => api.get("/billing/subscription");
+export const buyCredits = (amountCents) => api.post("/billing/credits", { amountCents });
+
+/* ---- Sessão ---- */
+export function logout() { setToken(null); }

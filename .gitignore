@@ -28,3 +28,7 @@ uploads_tmp/
 
 # Superpowers SDD scratch (ledger / diffs) — não versionar
 .superpowers/
+
+# Documentos pessoais/empresariais — nunca versionar (contem PII)
+CCMEI*.pdf
+*.pdf
