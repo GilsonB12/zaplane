@@ -1,11 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { BillingService } from '../billing/billing.service';
 import { phoneHash } from '../common/crypto.util';
 import { normalizeBrPhone } from '../common/phone.util';
 
 @Injectable()
 export class MessagesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private billing: BillingService) {}
 
   /** Envio avulso para 1 número: enfileira uma outbound_message (template).
    *  channelId é opcional: sem ele, usa o canal ativo do org (padrão A5). */
@@ -44,6 +45,11 @@ export class MessagesService {
       },
     };
 
+    // pré-checagem de saldo: bloqueia ANTES de enfileirar se a carteira não
+    // cobre o preço fixo por mensagem (débito real só ocorre via webhook,
+    // quando a Meta confirma billable=true).
+    await this.billing.assertBalanceFor(orgId, this.billing.usagePriceCents);
+
     const msg = await this.prisma.outboundMessage.create({
       data: {
         organizationId: orgId, channelId: channel.id, contactId: contact?.id ?? null,
@@ -81,6 +87,11 @@ export class MessagesService {
       type: 'text',
       text: { body: dto.text, preview_url: false },
     };
+
+    // pré-checagem de saldo: bloqueia ANTES de enfileirar se a carteira não
+    // cobre o preço fixo por mensagem (débito real só ocorre via webhook,
+    // quando a Meta confirma billable=true).
+    await this.billing.assertBalanceFor(orgId, this.billing.usagePriceCents);
 
     const msg = await this.prisma.outboundMessage.create({
       data: {

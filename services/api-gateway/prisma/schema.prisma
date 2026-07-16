@@ -162,6 +162,9 @@ model Campaign {
   readCount         Int       @default(0) @map("read_count")
   failedCount       Int       @default(0) @map("failed_count")
   costEstimateCents BigInt?   @map("cost_estimate_cents")
+  // estimativa da taxa Zaplane (elegiveis x BILLING_USAGE_PRICE_CENTS) —
+  // distinta de costEstimateCents, que e a estimativa do custo Meta.
+  platformFeeEstimateCents BigInt? @map("platform_fee_estimate_cents")
   createdBy         String?   @map("created_by") @db.Uuid
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)

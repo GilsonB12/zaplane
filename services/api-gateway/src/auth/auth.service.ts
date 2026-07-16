@@ -53,9 +53,15 @@ export class AuthService {
       });
       // cria a carteira pré-paga (saldo 0) da org — sem isso, o débito de
       // billing (webhooks.service.ts) cai no ramo "sem carteira provisionada"
-      // e nunca desconta nada (ver review B1, Fix 2). Assinatura (B2) NÃO é
-      // provisionada aqui.
+      // e nunca desconta nada (ver review B1, Fix 2).
       await tx.wallet.create({ data: { organizationId: org.id, balanceCents: 0 } });
+      // cria a assinatura da org já 'inactive' (sem trial — precisa assinar
+      // para liberar campanhas/envios via SubscriptionGuard). Orgs que já
+      // existiam antes da B2 foram "grandfathered" como 'active' pela
+      // migração 005 (backfill); orgs novas passam sempre por aqui.
+      await tx.subscription.create({
+        data: { organizationId: org.id, status: 'inactive', provider: 'asaas', priceCents: 13500 },
+      });
       return { org, user };
     });
 

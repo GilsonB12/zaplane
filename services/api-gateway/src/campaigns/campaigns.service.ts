@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { BillingService } from '../billing/billing.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { QueryCampaignsDto } from './dto/query-campaigns.dto';
 
@@ -15,7 +16,7 @@ const RATE_CENTS: Record<string, number> = {
 
 @Injectable()
 export class CampaignsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private billing: BillingService) {}
 
   async create(orgId: string, userId: string, dto: CreateCampaignDto) {
     // fallback: usa o canal ativo do org quando channelId não é informado
@@ -48,9 +49,19 @@ export class CampaignsService {
     });
     const suppressed = audience.length - eligible.length;
 
-    // 3) cria a campanha
+    // 3) estimativa do custo Meta (exibida antes do disparo) + estimativa da
+    // taxa Zaplane (elegíveis x preço fixo por mensagem tarifada) — dois
+    // números de origens distintas, ver spec §5 (B2).
     // arredonda p/ centavo inteiro (tarifas têm fração de centavo; BigInt exige inteiro)
     const costEstimate = BigInt(Math.round(eligible.length * (RATE_CENTS[template.category] ?? 0)));
+    const platformFeeEstimate = BigInt(eligible.length * this.billing.usagePriceCents);
+
+    // 4) pré-checagem de saldo: bloqueia ANTES de criar a campanha/enfileirar
+    // se a carteira não cobre o teto estimado (débito real ocorre só quando
+    // a Meta confirma billable=true, via webhook).
+    await this.billing.assertBalanceFor(orgId, Number(platformFeeEstimate));
+
+    // 5) cria a campanha
     const campaign = await this.prisma.campaign.create({
       data: {
         organizationId: orgId, channelId: channel.id, templateId: dto.templateId,
@@ -60,11 +71,11 @@ export class CampaignsService {
         status: dto.scheduledAt ? 'scheduled' : 'queuing',
         scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
         totalRecipients: eligible.length, suppressedCount: suppressed,
-        costEstimateCents: costEstimate, createdBy: userId,
+        costEstimateCents: costEstimate, platformFeeEstimateCents: platformFeeEstimate, createdBy: userId,
       },
     });
 
-    // 4) enfileira (uma linha por destinatário em outbound_messages)
+    // 6) enfileira (uma linha por destinatário em outbound_messages)
     if (eligible.length > 0 && !dto.scheduledAt) {
       const rows = eligible.map((c) => ({
         organizationId: orgId,
@@ -87,6 +98,7 @@ export class CampaignsService {
       totalRecipients: eligible.length,
       suppressed,
       costEstimateCents: Number(costEstimate),
+      platformFeeEstimateCents: Number(platformFeeEstimate),
       status: dto.scheduledAt ? 'scheduled' : 'sending',
     };
   }
@@ -124,6 +136,7 @@ export class CampaignsService {
       readCount: c.readCount,
       failedCount: c.failedCount,
       costEstimateCents: c.costEstimateCents != null ? Number(c.costEstimateCents) : null,
+      platformFeeEstimateCents: c.platformFeeEstimateCents != null ? Number(c.platformFeeEstimateCents) : null,
       scheduledAt: c.scheduledAt,
       createdAt: c.createdAt,
     }));
@@ -152,6 +165,7 @@ export class CampaignsService {
       read: c.readCount,
       failed: c.failedCount,
       costEstimateCents: c.costEstimateCents != null ? Number(c.costEstimateCents) : null,
+      platformFeeEstimateCents: c.platformFeeEstimateCents != null ? Number(c.platformFeeEstimateCents) : null,
       createdAt: c.createdAt,
       scheduledAt: c.scheduledAt,
     };
