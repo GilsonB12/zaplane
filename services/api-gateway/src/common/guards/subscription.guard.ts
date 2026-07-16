@@ -5,6 +5,8 @@ import { REQUIRE_ACTIVE_SUBSCRIPTION_KEY } from '../decorators/subscription.deco
 
 interface CacheEntry {
   status: string;
+  provider: string;
+  currentPeriodEnd: Date | null;
   graceEndsAt: Date | null;
   expiresAt: number;
 }
@@ -21,6 +23,15 @@ const SUBSCRIPTION_CACHE_TTL_MS = 60 * 1000;
  * 5 dias após vencimento, decisão da spec). Degradação preguiçosa (sem
  * cron): ao encontrar 'past_due' com carência já vencida, primeiro rebaixa
  * para 'canceled' no banco e então trata como bloqueado.
+ *
+ * status='active' só é aceito quando provider='manual' (orgs grandfathered
+ * pela migração 005, sem integração Asaas real) OU quando
+ * current_period_end é null OU ainda não passou. Sem essa checagem, uma
+ * assinatura Asaas que ficou 'active' no 1º pagamento confirmado
+ * continuaria liberando envios para sempre, mesmo após o período pago
+ * vencer sem o próximo pagamento ter sido confirmado ainda (o correto é
+ * cair para 'past_due'+carência via webhook payment_overdue — mas até esse
+ * webhook chegar, current_period_end vencido já deve bloquear).
  */
 @Injectable()
 export class SubscriptionGuard implements CanActivate {
@@ -45,8 +56,11 @@ export class SubscriptionGuard implements CanActivate {
 
     const entry = await this.resolve(orgId);
     const now = Date.now();
+    const activeAndCurrent =
+      entry.status === 'active' &&
+      (entry.provider === 'manual' || !entry.currentPeriodEnd || entry.currentPeriodEnd.getTime() > now);
     const allowed =
-      entry.status === 'active' ||
+      activeAndCurrent ||
       (entry.status === 'past_due' && !!entry.graceEndsAt && entry.graceEndsAt.getTime() > now);
 
     if (!allowed) this.throwInactive();
@@ -63,7 +77,13 @@ export class SubscriptionGuard implements CanActivate {
     // ocorrer em orgs criadas após a B2 (auth.service.ts provisiona) nem em
     // orgs pré-existentes (migração 005 fez o backfill 'active').
     if (!sub) {
-      const entry: CacheEntry = { status: 'inactive', graceEndsAt: null, expiresAt: Date.now() + SUBSCRIPTION_CACHE_TTL_MS };
+      const entry: CacheEntry = {
+        status: 'inactive',
+        provider: 'asaas',
+        currentPeriodEnd: null,
+        graceEndsAt: null,
+        expiresAt: Date.now() + SUBSCRIPTION_CACHE_TTL_MS,
+      };
       this.cache.set(orgId, entry);
       return entry;
     }
@@ -80,7 +100,13 @@ export class SubscriptionGuard implements CanActivate {
       if (degraded.count > 0) status = 'canceled';
     }
 
-    const entry: CacheEntry = { status, graceEndsAt, expiresAt: Date.now() + SUBSCRIPTION_CACHE_TTL_MS };
+    const entry: CacheEntry = {
+      status,
+      provider: sub.provider,
+      currentPeriodEnd: sub.currentPeriodEnd ?? null,
+      graceEndsAt,
+      expiresAt: Date.now() + SUBSCRIPTION_CACHE_TTL_MS,
+    };
     this.cache.set(orgId, entry);
     return entry;
   }

@@ -20,6 +20,18 @@ export default () => ({
   billing: {
     // preço fixo por mensagem efetivamente tarifada pela Meta (R$0,43 = 43 centavos)
     usagePriceCents: parseInt(process.env.BILLING_USAGE_PRICE_CENTS || '43', 10),
+    // preço da assinatura mensal (R$135,00 = 13500 centavos)
+    subscriptionPriceCents: parseInt(process.env.BILLING_SUBSCRIPTION_PRICE_CENTS || '13500', 10),
+    // provedor de pagamento ativo por trás da interface PaymentProviderAdapter
+    // (billing/providers/) — hoje só 'asaas' está implementado.
+    paymentProvider: process.env.PAYMENT_PROVIDER || 'asaas',
+    asaas: {
+      baseUrl: process.env.ASAAS_BASE_URL || 'https://sandbox.asaas.com/api/v3',
+      apiKey: process.env.ASAAS_API_KEY || '',
+      // token que o painel Asaas envia no header `asaas-access-token` do
+      // webhook — comparado em tempo constante (nunca logar este valor).
+      webhookToken: process.env.ASAAS_WEBHOOK_TOKEN || '',
+    },
   },
   zaplane: {
     appId: process.env.ZAPLANE_FB_APP_ID || '',
