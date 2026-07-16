@@ -59,8 +59,16 @@ export class AuthService {
       // para liberar campanhas/envios via SubscriptionGuard). Orgs que já
       // existiam antes da B2 foram "grandfathered" como 'active' pela
       // migração 005 (backfill); orgs novas passam sempre por aqui.
+      // Fix M2 (review final): preço vem do config (mesma fonte usada por
+      // BillingService.subscriptionPriceCents), não mais hardcoded — permite
+      // ajustar via BILLING_SUBSCRIPTION_PRICE_CENTS sem tocar código.
       await tx.subscription.create({
-        data: { organizationId: org.id, status: 'inactive', provider: 'asaas', priceCents: 13500 },
+        data: {
+          organizationId: org.id,
+          status: 'inactive',
+          provider: 'asaas',
+          priceCents: this.config.get<number>('billing.subscriptionPriceCents') ?? 13500,
+        },
       });
       return { org, user };
     });

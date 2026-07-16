@@ -366,10 +366,19 @@ export class BillingService {
     // efeito financeiro.
     let verifiedStatus: string | null = null;
     let verifiedOk = false;
+    // Fix 2 (review final, IMPORTANTE): capturamos o providerSubscriptionId
+    // da RE-CONSULTA ao Asaas (nunca do corpo do webhook, que é entrada não
+    // confiável) — é a evidência que handlePaymentConfirmed usa para decidir
+    // se uma cobrança confirmada pertence de fato a uma assinatura antes de
+    // ativá-la. Um corpo forjado poderia declarar `payment.subscription`
+    // para uma cobrança avulsa real; a re-consulta devolve o dado verdadeiro
+    // do Asaas para o mesmo payment.id já verificado pelo Fix C1.
+    let verifiedProviderSubscriptionId: string | null = null;
     if (event.type === 'payment_confirmed') {
       if (event.providerPaymentId) {
         const verified = await this.provider.getPayment(event.providerPaymentId);
         verifiedStatus = verified?.status ?? null;
+        verifiedProviderSubscriptionId = verified?.providerSubscriptionId ?? null;
         verifiedOk = verified != null && (verified.status === 'CONFIRMED' || verified.status === 'RECEIVED');
         if (!verifiedOk) {
           this.logger.warn(
@@ -414,7 +423,7 @@ export class BillingService {
 
       if (event.type === 'payment_confirmed') {
         if (!verifiedOk) return; // Fix C1: sem confirmação real do provedor, dinheiro não se move
-        await this.handlePaymentConfirmed(tx, orgId!, subscription, event, existingPayment);
+        await this.handlePaymentConfirmed(tx, orgId!, subscription, event, existingPayment, verifiedProviderSubscriptionId);
       } else if (event.type === 'payment_overdue') {
         await this.handlePaymentOverdue(tx, orgId!, subscription, event, existingPayment);
       } else if (event.type === 'subscription_canceled') {
@@ -429,6 +438,7 @@ export class BillingService {
     subscription: { id: string; providerSubscriptionId: string | null; priceCents: number; currentPeriodEnd: Date | null } | null,
     event: NormalizedEvent,
     existingPayment: { id: string; kind: string; status: string; creditedCents: number | null; amountCents: number } | null,
+    verifiedProviderSubscriptionId: string | null,
   ): Promise<void> {
     const isCreditTopup = existingPayment?.kind === 'credit_topup';
 
@@ -495,6 +505,29 @@ export class BillingService {
       return;
     }
 
+    // Fix 2 (review final, IMPORTANTE): só tratamos como pagamento de
+    // ASSINATURA se houver evidência POSITIVA disso — nunca "por exclusão"
+    // (ou seja, nunca "não é credit_topup, então deve ser assinatura").
+    // Cenário real: buyCredits morre entre createCharge (cobrança já criada
+    // no Asaas) e payments.create (linha local nunca chega a ser gravada) —
+    // o PAYMENT_CONFIRMED subsequente não acha `payments` local
+    // (existingPayment=null) e, sem esta trava, cairia direto aqui e
+    // ativaria indevidamente uma assinatura + criaria um
+    // payments(kind='subscription') fantasma para uma cobrança que na
+    // verdade era uma compra avulsa de créditos.
+    const isKnownSubscriptionPayment = existingPayment?.kind === 'subscription';
+    const hasSubscriptionLinkage = Boolean(verifiedProviderSubscriptionId);
+    if (!isKnownSubscriptionPayment && !hasSubscriptionLinkage) {
+      this.logger.warn(
+        `Webhook Asaas: payment_confirmed (org ${orgId}, payment ${event.providerPaymentId ?? 'sem id'}) sem linha ` +
+          `'payments' local conhecida e sem vínculo de assinatura confirmado no provedor — não dá para classificar ` +
+          `com segurança como assinatura nem como crédito. Provável cobrança órfã (ex.: buyCredits interrompido ` +
+          `entre criar a cobrança e gravar 'payments'). Evento ignorado sem mover dinheiro; requer reconciliação ` +
+          `manual do operador.`,
+      );
+      return;
+    }
+
     // pagamento de assinatura (1ª cobrança ou renovação mensal)
     if (!subscription) {
       this.logger.warn(`payment_confirmed sem assinatura resolvida para a org ${orgId} — ignorado.`);
@@ -502,13 +535,73 @@ export class BillingService {
     }
 
     const now = new Date();
-    // Fix M3 (review B3): a base do novo período é max(now, current_period_end)
-    // — nunca sempre "now". Sem isso, um pagamento confirmado um pouco ANTES
-    // do vencimento do período vigente (ou um evento duplicado —
-    // PAYMENT_CONFIRMED + PAYMENT_RECEIVED para a mesma cobrança, chamando
-    // handlePaymentConfirmed duas vezes) reiniciaria o relógio a partir de
-    // "agora", encurtando (drift) ou sobrepondo (overlap) o período em vez de
-    // encadear corretamente a partir do fim do período atual.
+
+    // Fix 1 (review final, CRÍTICO): o período só avança na PRIMEIRA vez que
+    // ESTA cobrança específica (provider_payment_id) é processada — mesmo
+    // padrão de idempotência do ramo credit_topup acima, agora ancorado no
+    // UNIQUE(provider, provider_payment_id) de `payments` (migração
+    // 004_billing.sql) em vez de um lock explícito de linha. O Asaas manda
+    // PAYMENT_CONFIRMED e depois PAYMENT_RECEIVED para a MESMA cobrança, com
+    // ids de evento DIFERENTES — a dedupe de subscription_events não pega
+    // isso, então sem uma trava por payment.id o período avançava ~2 meses
+    // por pagamento (bug com o fix M3/max(now,currentPeriodEnd) anterior).
+    //
+    // O UPSERT abaixo cobre os dois casos possíveis:
+    //   - 1ª cobrança: `activateSubscription` já pré-criou a linha
+    //     `payments` como 'pending' com este mesmo provider_payment_id — o
+    //     INSERT colide (ON CONFLICT) e o UPDATE aplica (status ainda não
+    //     era 'paid') -> RETURNING devolve a linha -> avança o período.
+    //   - renovação mensal: nenhuma linha local pré-existe -> INSERT normal
+    //     -> RETURNING devolve a linha -> avança o período.
+    //   - 2º evento (CONFIRMED->RECEIVED, ou reentrega) para a MESMA
+    //     cobrança: colide de novo, mas a cláusula WHERE status<>'paid' já
+    //     não bate (já está 'paid') -> 0 linhas afetadas -> RETURNING vazio
+    //     -> período NÃO avança de novo. Idempotente também sob concorrência
+    //     real (duas transações batendo ao mesmo tempo serializam pelo lock
+    //     implícito do índice único; a segunda sempre vê status já 'paid').
+    let paymentRowId: string | null = null;
+    if (event.providerPaymentId) {
+      const rows = await tx.$queryRawUnsafe<Array<{ id: string }>>(
+        `INSERT INTO payments (organization_id, subscription_id, kind, provider, provider_payment_id, amount_cents, status, paid_at)
+         VALUES ($1::uuid, $2::uuid, 'subscription', 'asaas', $3, $4::int, 'paid', $5::timestamptz)
+         ON CONFLICT (provider, provider_payment_id)
+         DO UPDATE SET status = 'paid', paid_at = $5::timestamptz
+         WHERE payments.status <> 'paid'
+         RETURNING id`,
+        orgId,
+        subscription.id,
+        event.providerPaymentId,
+        event.amountCents ?? subscription.priceCents,
+        now,
+      );
+      paymentRowId = rows[0]?.id ?? null;
+    } else if (existingPayment) {
+      // sem providerPaymentId não dá para ancorar o upsert acima no UNIQUE
+      // (provider, provider_payment_id) — melhor esforço via a linha local
+      // já resolvida (não deveria ocorrer: o Asaas sempre manda payment.id
+      // nos webhooks reais).
+      if (existingPayment.status === 'paid') {
+        paymentRowId = null; // já processado — idempotente, não avança de novo
+      } else {
+        await tx.payment.update({ where: { id: existingPayment.id }, data: { status: 'paid', paidAt: now } });
+        paymentRowId = existingPayment.id;
+      }
+    } else {
+      this.logger.warn(
+        `Webhook Asaas: payment_confirmed de assinatura sem providerPaymentId e sem 'payments' local (org ${orgId}) — ignorado.`,
+      );
+      return;
+    }
+
+    if (!paymentRowId) return; // cobrança já processada — idempotente, período não avança de novo
+
+    // Fix M3 (review B3, preservado): a base do novo período é
+    // max(now, current_period_end) — nunca sempre "now". Sem isso, um
+    // pagamento confirmado um pouco ANTES do vencimento do período vigente
+    // encurtaria (drift) ou sobreporia (overlap) o período em vez de
+    // encadear corretamente a partir do fim do período atual. Combinado com
+    // o Fix 1 acima (avanço só na 1ª vez por cobrança), CONFIRMED+RECEIVED da
+    // MESMA cobrança agora rendem exatamente 1 mês, não 2.
     const base =
       subscription.currentPeriodEnd && subscription.currentPeriodEnd > now ? subscription.currentPeriodEnd : now;
     const periodEnd = new Date(base);
@@ -524,25 +617,6 @@ export class BillingService {
         provider: 'asaas',
       },
     });
-
-    if (existingPayment) {
-      await tx.payment.update({ where: { id: existingPayment.id }, data: { status: 'paid', paidAt: now } });
-    } else {
-      // renovação mensal: o Asaas gera um novo `payment` que nunca passou
-      // pelo nosso buyCredits/activateSubscription — registramos agora.
-      await tx.payment.create({
-        data: {
-          organizationId: orgId,
-          subscriptionId: subscription.id,
-          kind: 'subscription',
-          amountCents: event.amountCents ?? subscription.priceCents,
-          status: 'paid',
-          provider: 'asaas',
-          providerPaymentId: event.providerPaymentId,
-          paidAt: now,
-        },
-      });
-    }
   }
 
   private async handlePaymentOverdue(
