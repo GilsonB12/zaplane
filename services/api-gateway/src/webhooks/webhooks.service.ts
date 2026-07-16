@@ -166,12 +166,24 @@ export class WebhooksService {
     const now = new Date();
     const data: any = { status: status.status };
     const counter: any = {};
-    if (status.status === 'delivered') { data.deliveredAt = now; counter.deliveredCount = { increment: 1 }; }
-    if (status.status === 'read') { data.readAt = now; counter.readCount = { increment: 1 }; }
+    // os contadores da campanha só podem subir na PRIMEIRA transição para cada
+    // status — a Meta pode reentregar o mesmo webhook (rede instável, retry do
+    // lado deles etc.), e sem essa guarda um reenvio dobraria delivered/read/
+    // failed mesmo a mensagem tendo transicionado só uma vez de verdade. As
+    // colunas deliveredAt/readAt/sentAt continuam sendo gravadas de forma
+    // idempotente (mesmo valor em reenvios), só o incremento é que é gated.
+    if (status.status === 'delivered') {
+      data.deliveredAt = now;
+      if (msg.deliveredAt == null) counter.deliveredCount = { increment: 1 };
+    }
+    if (status.status === 'read') {
+      data.readAt = now;
+      if (msg.readAt == null) counter.readCount = { increment: 1 };
+    }
     if (status.status === 'sent') { data.sentAt = now; }
     if (status.status === 'failed') {
       data.errorDetail = JSON.stringify(status.errors ?? {});
-      counter.failedCount = { increment: 1 };
+      if (msg.status !== 'failed') counter.failedCount = { increment: 1 };
     }
     await this.prisma.outboundMessage.update({ where: { id: msg.id }, data });
     if (msg.campaignId && Object.keys(counter).length) {
@@ -199,7 +211,7 @@ export class WebhooksService {
   // duas vezes a mesma mensagem.
   private async recordPricing(
     pricing: { billable: boolean; category?: string; pricing_model?: string },
-    msg: { id: string; waMessageId: string | null },
+    msg: { id: string; waMessageId: string | null; organizationId: string },
     organizationId: string,
   ) {
     const category = pricing.category ?? null;
@@ -216,6 +228,21 @@ export class WebhooksService {
     }
 
     const priceCents = this.config.get<number>('billing.usagePriceCents') ?? 43;
+
+    // defesa em profundidade: outbound_messages.organization_id deveria SEMPRE
+    // coincidir com a organização dona do canal autenticado (ambos derivam da
+    // mesma campanha/envio) — um descompasso aqui indicaria um bug grave de
+    // particionamento multi-tenant. Por segurança, bloqueamos o débito
+    // financeiro nesse caso (sem PII/valor no log) em vez de confiar cegamente
+    // no organizationId do canal.
+    if (msg.organizationId && msg.organizationId !== organizationId) {
+      this.logger.warn('recordPricing: organização da mensagem diverge da organização do canal — débito bloqueado.');
+      await this.prisma.outboundMessage.update({
+        where: { id: msg.id },
+        data: { billable: true, pricingCategory: category, pricingModel, billingRecordedAt: new Date() },
+      });
+      return;
+    }
 
     if (!msg.waMessageId) {
       // sem wa_message_id não há chave de idempotência confiável para o
@@ -239,16 +266,26 @@ export class WebhooksService {
       );
       const hasWallet = walletRows.length > 0;
       const currentBalance = walletRows[0]?.balance_cents ?? 0;
-      // CHECK(balance_cents >= 0): nunca deixamos o saldo ir negativo
+      // CHECK(balance_cents >= 0): nunca deixamos o saldo ir negativo. Quando o
+      // saldo é insuficiente (currentBalance < priceCents), o débito é
+      // "clampado" em currentBalance (deduz só o que existe) em vez do
+      // priceCents cheio. Isso é um PALIATIVO (stopgap): a pré-checagem de
+      // saldo da B2 (assertBalanceFor, antes de enfileirar a mensagem) deve
+      // tornar este caminho inatingível na prática — o envio é bloqueado antes
+      // de a Meta chegar a tarifar. Mesmo assim, para manter o livro-razão
+      // auditável, registramos a diferença não coberta em `metadata.shortfall_cents`.
       const newBalance = Math.max(currentBalance - priceCents, 0);
+      const actuallyDeducted = currentBalance - newBalance;
+      const shortfallCents = priceCents - actuallyDeducted;
+      const metadata = shortfallCents > 0 ? { shortfall_cents: shortfallCents } : {};
 
       const inserted = await tx.$queryRawUnsafe<Array<{ id: bigint }>>(
         `INSERT INTO wallet_transactions
            (organization_id, kind, amount_cents, balance_after_cents, reason, outbound_message_id, wa_message_id, metadata)
-         VALUES ($1::uuid, 'debit', $2::int, $3::int, 'message', $4::uuid, $5, '{}'::jsonb)
+         VALUES ($1::uuid, 'debit', $2::int, $3::int, 'message', $4::uuid, $5, $6::jsonb)
          ON CONFLICT (organization_id, wa_message_id) WHERE kind = 'debit' DO NOTHING
          RETURNING id`,
-        organizationId, priceCents, newBalance, msg.id, msg.waMessageId,
+        organizationId, priceCents, newBalance, msg.id, msg.waMessageId, JSON.stringify(metadata),
       );
 
       if (inserted.length > 0 && hasWallet) {

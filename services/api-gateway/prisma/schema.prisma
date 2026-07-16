@@ -277,6 +277,12 @@ model WalletTransaction {
   outboundMessage OutboundMessage? @relation(fields: [outboundMessageId], references: [id], onDelete: SetNull)
   payment         Payment?         @relation(fields: [paymentId], references: [id])
 
+  // NOTA: este @@unique NÃO reproduz o predicado parcial da constraint real —
+  // no banco é `UNIQUE(organization_id, wa_message_id) WHERE kind = 'debit'`
+  // (índice parcial, ver db/migrations/004_billing.sql), algo que o Prisma
+  // Client não expressa no schema. O banco continua sendo a fonte de verdade
+  // (este repo usa `prisma db pull`, nunca `prisma migrate`), então não editar
+  // esta linha manualmente esperando mudar o comportamento em runtime.
   @@unique([organizationId, waMessageId], map: "ux_wallet_tx_org_wamsg_debit")
   @@map("wallet_transactions")
 }

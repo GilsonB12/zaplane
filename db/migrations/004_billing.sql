@@ -144,6 +144,16 @@ ALTER TABLE outbound_messages
     -- guard de idempotencia do debito (setado tanto p/ billable=true quanto false)
     ADD COLUMN IF NOT EXISTS billing_recorded_at   TIMESTAMPTZ;
 
+-- ---------------------------------------------------------------------
+-- 7. Backfill: garante uma carteira (saldo 0) para toda organizacao ja
+--    existente. Sem isso, o debito de billing cai sempre no ramo "sem
+--    carteira provisionada" e nao desconta nada (ver review B1, Fix 2).
+--    Idempotente via ON CONFLICT — reaplicar esta migracao e' seguro.
+-- ---------------------------------------------------------------------
+INSERT INTO wallets (organization_id)
+    SELECT id FROM organizations
+    ON CONFLICT (organization_id) DO NOTHING;
+
 -- =====================================================================
 -- Fim da migracao 004. Proximo passo: `npx prisma generate` apos ajustar
 -- prisma/schema.prisma (novos models + colunas de OutboundMessage).

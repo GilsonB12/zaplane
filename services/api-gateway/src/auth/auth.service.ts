@@ -51,6 +51,11 @@ export class AuthService {
           status: 'active',
         },
       });
+      // cria a carteira pré-paga (saldo 0) da org — sem isso, o débito de
+      // billing (webhooks.service.ts) cai no ramo "sem carteira provisionada"
+      // e nunca desconta nada (ver review B1, Fix 2). Assinatura (B2) NÃO é
+      // provisionada aqui.
+      await tx.wallet.create({ data: { organizationId: org.id, balanceCents: 0 } });
       return { org, user };
     });
 
