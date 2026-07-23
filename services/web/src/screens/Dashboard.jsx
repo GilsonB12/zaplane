@@ -25,29 +25,38 @@ export default function Dashboard({ setScreen, openCampaign }) {
     { id: "optout",   label: "Opt-outs (30d)",  valueNode: "—",   icon: ShieldCheck, live: false },
   ];
 
+  // Estado agregado da lista de campanhas (compartilhado pelas visões mobile e desktop)
+  const estadoLista = campRes.loading
+    ? { texto: "Carregando…", cls: "text-zinc-400" }
+    : campRes.error
+    ? { texto: "Erro ao carregar campanhas.", cls: "text-red-400" }
+    : ultimas.length === 0
+    ? { texto: "Nenhuma campanha ainda.", cls: "text-zinc-400" }
+    : null;
+
   return (
-    <div className="space-y-6 p-7">
+    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 lg:p-7">
       {/* KPIs */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         {kpis.map((k) => {
           const I = k.icon;
           return (
-            <Card key={k.id} className="p-5">
-              <div className="flex items-center justify-between">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-[#0F8C5A] dark:bg-emerald-500/10 dark:text-emerald-300">
+            <Card key={k.id} className="p-4 sm:p-5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-[#0F8C5A] dark:bg-emerald-500/10 dark:text-emerald-300">
                   <I className="h-[18px] w-[18px]" />
                 </div>
                 {k.live ? (
-                  <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300">
+                  <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300">
                     ao vivo
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-0.5 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400 ring-1 ring-inset ring-zinc-500/20 dark:bg-zinc-800 dark:text-zinc-500">
+                  <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400 ring-1 ring-inset ring-zinc-500/20 dark:bg-zinc-800 dark:text-zinc-500">
                     em breve
                   </span>
                 )}
               </div>
-              <div className="mt-4 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">
+              <div className="mt-3 break-words text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white sm:mt-4">
                 {k.valueNode}
               </div>
               <div className="text-[13px] text-zinc-500 dark:text-zinc-400">{k.label}</div>
@@ -57,13 +66,13 @@ export default function Dashboard({ setScreen, openCampaign }) {
       </div>
 
       {/* Saúde do número — placeholder rotulado */}
-      <Card className="p-5">
-        <div className="flex items-start justify-between">
-          <div>
+      <Card className="p-4 sm:p-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+          <div className="min-w-0">
             <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Saúde do número</h2>
             <p className="text-[13px] text-zinc-500 dark:text-zinc-400">Canal de envio</p>
           </div>
-          <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-400 ring-1 ring-inset ring-zinc-500/20 dark:bg-zinc-800 dark:text-zinc-500">
+          <span className="inline-flex w-fit shrink-0 items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-400 ring-1 ring-inset ring-zinc-500/20 dark:bg-zinc-800 dark:text-zinc-500">
             em breve — Fatia 2
           </span>
         </div>
@@ -74,16 +83,55 @@ export default function Dashboard({ setScreen, openCampaign }) {
 
       {/* Últimas campanhas — live */}
       <Card className="overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4">
-          <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Últimas campanhas</h2>
+        <div className="flex items-center justify-between gap-3 px-4 py-3.5 sm:px-5 sm:py-4">
+          <h2 className="min-w-0 truncate text-sm font-semibold text-zinc-900 dark:text-white">Últimas campanhas</h2>
           <button
             onClick={() => setScreen("campanhas")}
-            className="inline-flex items-center gap-1 text-xs font-medium text-[#0F8C5A] hover:underline dark:text-emerald-300"
+            className="-my-2 inline-flex shrink-0 items-center gap-1 py-2 text-xs font-medium text-[#0F8C5A] hover:underline dark:text-emerald-300"
           >
             Ver todas <ChevronRight className="h-3.5 w-3.5" />
           </button>
         </div>
-        <div className="overflow-x-auto">
+
+        {/* Mobile: lista de cards (o dedo agradece) */}
+        <div className="lg:hidden">
+          {estadoLista ? (
+            <div className={`border-t border-zinc-100 px-4 py-6 text-center text-[13px] dark:border-zinc-800 ${estadoLista.cls}`}>
+              {estadoLista.texto}
+            </div>
+          ) : (
+            <ul className="divide-y divide-zinc-100 border-t border-zinc-100 dark:divide-zinc-800/60 dark:border-zinc-800">
+              {ultimas.map((c) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => openCampaign(c.id)}
+                    className="flex w-full flex-col gap-2 px-4 py-3.5 text-left active:bg-zinc-50 dark:active:bg-zinc-800/20"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="min-w-0 flex-1 break-words text-sm font-medium text-zinc-800 dark:text-zinc-100">
+                        {c.nome}
+                      </span>
+                      <span className="inline-flex shrink-0 items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 ring-1 ring-inset ring-zinc-500/20 dark:bg-zinc-700/40 dark:text-zinc-300">
+                        {c.status}
+                      </span>
+                    </div>
+                    <ProgressBar value={c.enviadas} total={c.total || 1} color={TEAL} />
+                    <div className="flex items-center justify-between gap-3 text-[12px] text-zinc-400">
+                      <span className="min-w-0 truncate">{c.quando}</span>
+                      <span className="shrink-0 tabular-nums text-zinc-600 dark:text-zinc-300">
+                        {c.enviadas.toLocaleString("pt-BR")} enviadas
+                      </span>
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* Desktop: tabela completa */}
+        <div className="hidden overflow-x-auto lg:block">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-y border-zinc-100 bg-zinc-50/60 text-left text-[11px] uppercase tracking-wide text-zinc-400 dark:border-zinc-800 dark:bg-zinc-800/40">
@@ -95,22 +143,10 @@ export default function Dashboard({ setScreen, openCampaign }) {
               </tr>
             </thead>
             <tbody>
-              {campRes.loading ? (
+              {estadoLista ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-6 text-center text-[13px] text-zinc-400">
-                    Carregando…
-                  </td>
-                </tr>
-              ) : campRes.error ? (
-                <tr>
-                  <td colSpan={5} className="px-5 py-6 text-center text-[13px] text-red-400">
-                    Erro ao carregar campanhas.
-                  </td>
-                </tr>
-              ) : ultimas.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-5 py-6 text-center text-[13px] text-zinc-400">
-                    Nenhuma campanha ainda.
+                  <td colSpan={5} className={`px-5 py-6 text-center text-[13px] ${estadoLista.cls}`}>
+                    {estadoLista.texto}
                   </td>
                 </tr>
               ) : (

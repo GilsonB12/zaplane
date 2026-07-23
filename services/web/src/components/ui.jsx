@@ -2,7 +2,7 @@ import React from "react";
 import {
   CheckCheck, BadgeCheck, Clock, XCircle, Zap, ShieldCheck, Sun, Moon,
   LayoutDashboard, Users, Send, Megaphone, LayoutTemplate, Settings, LogOut,
-  MessagesSquare,
+  MessagesSquare, Menu, X,
 } from "lucide-react";
 
 /* ----------------------------- Tokens de cor ----------------------------- */
@@ -147,72 +147,99 @@ export function WhatsAppBubble({ corpo, botoes = [], nome = "Mariana" }) {
 }
 
 /* ----------------------------- Sidebar ----------------------------- */
-export function Sidebar({ screen, setScreen }) {
+export function Sidebar({ screen, setScreen, open = false, onClose = () => {} }) {
+  // No mobile a navegação é um drawer sobreposto; do lg pra cima ela é fixa na coluna.
+  const go = (id) => { setScreen(id); onClose(); };
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-zinc-200 bg-white px-3 py-5 dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="flex items-center gap-2.5 px-2 pb-6">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl text-white shadow-sm" style={{ background: `linear-gradient(135deg, ${BRAND}, ${TEAL})` }}>
-          <Zap className="h-5 w-5" />
-        </div>
-        <div>
-          <div className="text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-white">Zaplane</div>
-          <div className="text-[11px] text-zinc-400">WhatsApp Business API</div>
-        </div>
-      </div>
+    <>
+      {/* Fundo escurecido — só existe com o drawer aberto no mobile */}
+      {open && (
+        <div onClick={onClose} aria-hidden="true"
+          className="fixed inset-0 z-40 bg-zinc-900/60 backdrop-blur-[2px] lg:hidden" />
+      )}
 
-      <nav className="flex flex-1 flex-col gap-1">
-        {NAV.map((n) => {
-          const active = screen === n.id || (screen === "campanha-detalhe" && n.id === "campanhas");
-          const I = n.icon;
-          return (
-            <button key={n.id} onClick={() => setScreen(n.id)}
-              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
-                active ? "bg-emerald-50 text-[#0F8C5A] dark:bg-emerald-500/10 dark:text-emerald-300"
-                       : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}>
-              <I className="h-[18px] w-[18px]" />
-              {n.label}
-              {n.id === "campanhas" && <span className="ml-auto rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300">1</span>}
-            </button>
-          );
-        })}
-      </nav>
-
-      <div className="mt-4 rounded-xl border border-emerald-200/60 bg-emerald-50/60 p-3 dark:border-emerald-500/20 dark:bg-emerald-500/5">
-        <div className="flex items-center gap-2 text-xs font-semibold text-[#0F8C5A] dark:text-emerald-300">
-          <ShieldCheck className="h-4 w-4" /> Conformidade LGPD
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex w-[17rem] max-w-[85vw] flex-col overflow-y-auto border-r border-zinc-200 bg-white px-3 py-5 transition-transform duration-200 ease-out motion-reduce:transition-none dark:border-zinc-800 dark:bg-zinc-900 lg:static lg:z-auto lg:w-64 lg:max-w-none lg:shrink-0 lg:translate-x-0 ${
+          open ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="flex items-center gap-2.5 px-2 pb-6">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white shadow-sm" style={{ background: `linear-gradient(135deg, ${BRAND}, ${TEAL})` }}>
+            <Zap className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-white">Zaplane</div>
+            <div className="truncate text-[11px] text-zinc-400">WhatsApp Business API</div>
+          </div>
+          {/* Fechar — só no drawer */}
+          <button onClick={onClose} aria-label="Fechar menu"
+            className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 lg:hidden">
+            <X className="h-5 w-5" />
+          </button>
         </div>
-        <p className="mt-1 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
-          Base de consentimento ativa. <a href="#" className="font-medium text-[#0F8C5A] underline-offset-2 hover:underline dark:text-emerald-300">Política de privacidade</a>
-        </p>
-      </div>
-    </aside>
+
+        <nav className="flex flex-1 flex-col gap-1">
+          {NAV.map((n) => {
+            const active = screen === n.id || (screen === "campanha-detalhe" && n.id === "campanhas");
+            const I = n.icon;
+            return (
+              <button key={n.id} data-nav-item onClick={() => go(n.id)}
+                className={`flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition-colors lg:py-2.5 ${
+                  active ? "bg-emerald-50 text-[#0F8C5A] dark:bg-emerald-500/10 dark:text-emerald-300"
+                         : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}>
+                <I className="h-[18px] w-[18px] shrink-0" />
+                {n.label}
+                {n.id === "campanhas" && <span className="ml-auto rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300">1</span>}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="mt-4 rounded-xl border border-emerald-200/60 bg-emerald-50/60 p-3 dark:border-emerald-500/20 dark:bg-emerald-500/5">
+          <div className="flex items-center gap-2 text-xs font-semibold text-[#0F8C5A] dark:text-emerald-300">
+            <ShieldCheck className="h-4 w-4 shrink-0" /> Conformidade LGPD
+          </div>
+          <p className="mt-1 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+            Base de consentimento ativa. <a href="#" className="font-medium text-[#0F8C5A] underline-offset-2 hover:underline dark:text-emerald-300">Política de privacidade</a>
+          </p>
+        </div>
+      </aside>
+    </>
   );
 }
 
 /* ----------------------------- Topbar ----------------------------- */
-export function Topbar({ title, subtitle, dark, setDark, actions, onLogout }) {
+export function Topbar({ title, subtitle, dark, setDark, actions, onLogout, onMenu }) {
   return (
-    <header className="sticky top-0 z-20 flex items-center gap-4 border-b border-zinc-200 bg-white/80 px-7 py-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/80">
-      <div className="min-w-0">
-        <h1 className="truncate text-lg font-semibold tracking-tight text-zinc-900 dark:text-white">{title}</h1>
-        {subtitle && <p className="truncate text-[13px] text-zinc-500 dark:text-zinc-400">{subtitle}</p>}
+    <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-zinc-200 bg-white/80 px-3 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/80 sm:gap-3 sm:px-5 sm:py-4 lg:px-7">
+      {/* Abrir navegação — só no mobile, onde a sidebar é drawer */}
+      <button data-nav-toggle onClick={onMenu} aria-label="Abrir menu"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-200 text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 lg:hidden">
+        <Menu className="h-5 w-5" />
+      </button>
+
+      <div className="min-w-0 flex-1">
+        <h1 className="truncate text-base font-semibold tracking-tight text-zinc-900 dark:text-white sm:text-lg">{title}</h1>
+        {subtitle && <p className="hidden truncate text-[13px] text-zinc-500 dark:text-zinc-400 sm:block">{subtitle}</p>}
       </div>
-      <div className="ml-auto flex items-center gap-2">
+
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         {actions}
-        <button onClick={() => setDark(!dark)} title="Alternar tema"
-          className="flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800">
+        <button onClick={() => setDark(!dark)} title="Alternar tema" aria-label="Alternar tema"
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 sm:h-9 sm:w-9">
           {dark ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
         </button>
-        <div className="flex items-center gap-2 rounded-xl border border-zinc-200 py-1.5 pl-1.5 pr-3 dark:border-zinc-800">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-900 text-xs font-semibold text-white dark:bg-zinc-700">AB</div>
-          <div className="leading-tight whitespace-nowrap">
+        {/* Identidade: só o avatar no mobile; nome e papel a partir de md */}
+        <div className="flex items-center gap-2 rounded-xl border border-zinc-200 p-1.5 dark:border-zinc-800 md:pr-3">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-xs font-semibold text-white dark:bg-zinc-700">AB</div>
+          <div className="hidden leading-tight whitespace-nowrap md:block">
             <div className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">Ana Beatriz</div>
             <div className="text-[10px] text-zinc-400">Owner</div>
           </div>
         </div>
         {onLogout && (
-          <button onClick={onLogout} title="Sair"
-            className="flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800">
+          <button onClick={onLogout} title="Sair" aria-label="Sair"
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 sm:h-9 sm:w-9">
             <LogOut className="h-[18px] w-[18px]" />
           </button>
         )}
@@ -225,7 +252,7 @@ export function Topbar({ title, subtitle, dark, setDark, actions, onLogout }) {
 export function PrimaryBtn({ children, onClick, className = "", disabled = false }) {
   return (
     <button onClick={onClick} disabled={disabled}
-      className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed sm:py-2 ${className}`}
       style={{ backgroundColor: BRAND }}
       onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.backgroundColor = BRAND_DARK; }}
       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = BRAND)}>

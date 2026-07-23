@@ -98,48 +98,53 @@ export default function EnviarMensagemModal({ contato, onClose }) {
     { id: "texto", label: "Texto livre", icon: MessageSquare, hint: "janela 24h" },
   ];
 
+  // mesmo chip renderizado em dois pontos do header (abaixo do título no mobile,
+  // ao lado do "X" no desktop) — sem duplicar a marcação
+  const chipJanela = janela ? (
+    <span
+      title={janela.aberta ? expiraEm(janela.expiresAt) : "Janela de 24h fechada"}
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${
+        janela.aberta
+          ? "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300"
+          : "bg-zinc-100 text-zinc-500 ring-zinc-500/20 dark:bg-zinc-800 dark:text-zinc-400"
+      }`}
+    >
+      {janela.aberta ? `🟢 janela aberta — ${expiraEm(janela.expiresAt)}` : "⚪ janela fechada — use template"}
+    </span>
+  ) : null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-2xl rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
-          <div>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-900/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={onClose}>
+      <div className="flex max-h-[92vh] w-full flex-col rounded-t-2xl border border-zinc-200 bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl dark:border-zinc-800 dark:bg-zinc-900" onClick={(e) => e.stopPropagation()}>
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-zinc-100 px-4 py-4 sm:items-center sm:px-6 dark:border-zinc-800">
+          <div className="min-w-0">
             <h3 className="text-base font-semibold text-zinc-900 dark:text-white">Enviar mensagem</h3>
-            <p className="text-[13px] text-zinc-500 dark:text-zinc-400">
+            <p className="text-[13px] text-zinc-500 break-words dark:text-zinc-400">
               Para <span className="font-medium text-zinc-700 dark:text-zinc-200">{contato.nome}</span>
               {" "}<span className="tabular-nums">{contato.tel}</span>
             </p>
+            {chipJanela && <div className="mt-2 sm:hidden">{chipJanela}</div>}
           </div>
-          <div className="flex items-center gap-3">
-            {janela && (
-              <span
-                title={janela.aberta ? expiraEm(janela.expiresAt) : "Janela de 24h fechada"}
-                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${
-                  janela.aberta
-                    ? "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300"
-                    : "bg-zinc-100 text-zinc-500 ring-zinc-500/20 dark:bg-zinc-800 dark:text-zinc-400"
-                }`}
-              >
-                {janela.aberta ? `🟢 janela aberta — ${expiraEm(janela.expiresAt)}` : "⚪ janela fechada — use template"}
-              </span>
-            )}
-            <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+          <div className="flex shrink-0 items-center gap-3">
+            <div className="hidden sm:block">{chipJanela}</div>
+            <button onClick={onClose} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 sm:h-8 sm:w-8 dark:hover:bg-zinc-800">
               <X className="h-5 w-5" />
             </button>
           </div>
         </div>
 
-        <div className="space-y-4 p-6">
+        <div className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
           {/* abas de modo */}
-          <div className="flex items-center gap-1 rounded-xl border border-zinc-200 bg-zinc-50 p-1 dark:border-zinc-800 dark:bg-zinc-800/40" style={{ width: "fit-content" }}>
+          <div className="flex w-full items-center gap-1 rounded-xl border border-zinc-200 bg-zinc-50 p-1 sm:w-fit dark:border-zinc-800 dark:bg-zinc-800/40">
             {abas.map((a) => {
               const I = a.icon;
               const ativa = modo === a.id;
               return (
                 <button key={a.id} onClick={() => { usuarioEscolheu.current = true; setModo(a.id); setErro(null); setFeito(null); }}
-                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors ${
+                  className={`inline-flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-colors sm:flex-none sm:justify-start sm:py-1.5 ${
                     ativa ? "bg-white text-[#0F8C5A] shadow-sm dark:bg-zinc-900 dark:text-emerald-300" : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100"}`}>
-                  <I className="h-4 w-4" /> {a.label}
-                  <span className="text-[10px] font-normal text-zinc-400">({a.hint})</span>
+                  <I className="h-4 w-4 shrink-0" /> {a.label}
+                  <span className="hidden text-[10px] font-normal text-zinc-400 sm:inline">({a.hint})</span>
                 </button>
               );
             })}
@@ -147,7 +152,7 @@ export default function EnviarMensagemModal({ contato, onClose }) {
 
           {modo === "template" && (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="space-y-3">
+              <div className="min-w-0 space-y-3">
                 {tplRes.loading && <div className="text-[13px] text-zinc-400">Carregando templates…</div>}
                 {!tplRes.loading && aprovados.length === 0 && (
                   <div className="rounded-xl bg-amber-50 p-3 text-[12px] text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
@@ -160,7 +165,7 @@ export default function EnviarMensagemModal({ contato, onClose }) {
                     <select
                       value={tpl?.id ?? ""}
                       onChange={(e) => { setTemplateId(e.target.value); setValores({}); }}
-                      className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+                      className="h-11 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-base sm:h-auto sm:text-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
                     >
                       {aprovados.map((t) => <option key={t.id} value={t.id}>{t.nome} · {t.categoria}</option>)}
                     </select>
@@ -173,13 +178,13 @@ export default function EnviarMensagemModal({ contato, onClose }) {
                       value={valores[n] ?? ""}
                       onChange={(e) => setValores((v) => ({ ...v, [n]: e.target.value }))}
                       placeholder="Digite o valor…"
-                      className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[13px] outline-none focus:border-[#0F8C5A] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                      className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-base outline-none focus:border-[#0F8C5A] sm:px-2.5 sm:py-1.5 sm:text-[13px] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                     />
                   </div>
                 ))}
               </div>
               {tpl && (
-                <div>
+                <div className="min-w-0">
                   <div className="mb-2 text-[12px] font-medium text-zinc-500 dark:text-zinc-400">Prévia</div>
                   <WhatsAppBubble corpo={corpoPrevia} botoes={tpl.botoes} />
                 </div>
@@ -200,7 +205,7 @@ export default function EnviarMensagemModal({ contato, onClose }) {
                 onChange={(e) => setTexto(e.target.value)}
                 rows={4}
                 placeholder="Escreva sua mensagem…"
-                className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+                className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-base outline-none focus:border-[#0F8C5A] sm:py-2 sm:text-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
               />
             </div>
           )}
@@ -215,14 +220,14 @@ export default function EnviarMensagemModal({ contato, onClose }) {
           )}
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-zinc-100 px-6 py-4 dark:border-zinc-800">
-          <button onClick={onClose} className="rounded-xl border border-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">
+        <div className="flex shrink-0 justify-end gap-2 border-t border-zinc-100 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-4 dark:border-zinc-800">
+          <button onClick={onClose} className="flex-1 rounded-xl border border-zinc-200 px-3.5 py-2.5 text-sm font-medium text-zinc-600 sm:flex-none sm:py-2 dark:border-zinc-800 dark:text-zinc-300">
             Fechar
           </button>
           <button
             onClick={enviar}
             disabled={!podeEnviar}
-            className="rounded-xl px-3.5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex-1 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none sm:py-2"
             style={{ backgroundColor: "#0F8C5A" }}
           >
             {envio.pending ? "Enviando…" : "Enviar"}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Send, Clock, Check, CheckCheck, XCircle } from "lucide-react";
+import { Send, Clock, Check, CheckCheck, XCircle, ChevronLeft } from "lucide-react";
 import { BRAND } from "../components/ui.jsx";
 import { useResource, useMutation } from "../hooks/useResource.js";
 import { listConversations, getConversation, sendText } from "../api/endpoints.js";
@@ -128,7 +128,12 @@ export default function Conversas() {
   return (
     <div className="flex h-full min-h-0">
       {/* ---- Coluna: lista de conversas ---- */}
-      <div className="flex w-80 shrink-0 flex-col border-r border-zinc-200 dark:border-zinc-800">
+      {/* mobile: ocupa a tela toda e some quando há conversa aberta; lg: coluna fixa de 320px */}
+      <div
+        className={`w-full shrink-0 flex-col border-r border-zinc-200 dark:border-zinc-800 lg:flex lg:w-80 ${
+          sel ? "hidden" : "flex"
+        }`}
+      >
         <div className="min-h-0 flex-1 overflow-y-auto">
           {!listRes.data && listRes.loading && (
             <div className="p-6 text-center text-sm text-zinc-400">Carregando conversas…</div>
@@ -151,11 +156,11 @@ export default function Conversas() {
               <button
                 key={c.phone}
                 onClick={() => setSel(c.phone)}
-                className={`flex w-full items-start gap-3 border-b border-zinc-100 px-4 py-3 text-left transition-colors dark:border-zinc-800/60 ${
+                className={`flex w-full items-start gap-3 border-b border-zinc-100 px-4 py-3.5 text-left transition-colors dark:border-zinc-800/60 sm:py-3 ${
                   ativa ? "bg-emerald-50 dark:bg-emerald-500/10" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
                 }`}
               >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300 sm:h-9 sm:w-9">
                   {avatarLabel(c.name, c.phone)}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -188,22 +193,32 @@ export default function Conversas() {
       </div>
 
       {/* ---- Coluna: thread ---- */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* mobile: só aparece com conversa selecionada (a lista dá lugar a ela); lg: sempre visível */}
+      <div className={`min-w-0 flex-1 flex-col lg:flex ${sel ? "flex" : "hidden"}`}>
         {!sel && (
-          <div className="flex flex-1 items-center justify-center text-sm text-zinc-400">
+          <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-zinc-400">
             Selecione uma conversa para ver as mensagens.
           </div>
         )}
 
         {sel && (
           <>
-            <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-3 dark:border-zinc-800">
-              <div className="min-w-0">
-                <div className="truncate text-[14px] font-semibold text-zinc-900 dark:text-white">{nomeSel}</div>
-                <div className="text-[12px] tabular-nums text-zinc-400">{sel}</div>
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800 sm:px-5 sm:py-3">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <button
+                  onClick={() => setSel(null)}
+                  aria-label="Voltar para a lista de conversas"
+                  className="-ml-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 lg:hidden"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <div className="min-w-0">
+                  <div className="truncate text-[14px] font-semibold text-zinc-900 dark:text-white">{nomeSel}</div>
+                  <div className="truncate text-[12px] tabular-nums text-zinc-400">{sel}</div>
+                </div>
               </div>
               <span
-                className={`ml-3 shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${
+                className={`ml-0 shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset sm:ml-3 ${
                   thread?.windowOpen
                     ? "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300"
                     : "bg-zinc-100 text-zinc-500 ring-zinc-500/20 dark:bg-zinc-800 dark:text-zinc-400"
@@ -213,7 +228,7 @@ export default function Conversas() {
               </span>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto bg-[#E5DDD5]/40 px-5 py-4 dark:bg-zinc-900/40">
+            <div className="min-h-0 flex-1 overflow-y-auto bg-[#E5DDD5]/40 px-3 py-3 dark:bg-zinc-900/40 sm:px-5 sm:py-4">
               {!thread && (
                 <div className="text-center text-sm text-zinc-400">Carregando conversa…</div>
               )}
@@ -228,13 +243,13 @@ export default function Conversas() {
                   return (
                     <div key={m.id} className={`flex ${out ? "justify-end" : "justify-start"}`}>
                       <div
-                        className={`max-w-[70%] rounded-xl px-3 py-2 text-[13px] leading-snug shadow-sm ${
+                        className={`max-w-[85%] rounded-xl px-3 py-2 text-[13px] leading-snug shadow-sm sm:max-w-[70%] ${
                           out
                             ? "rounded-tr-sm bg-[#DCF8C6] text-zinc-800 dark:bg-[#075E54]/90 dark:text-zinc-50"
                             : "rounded-tl-sm bg-white text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100"
                         }`}
                       >
-                        <p className="whitespace-pre-wrap">
+                        <p className="whitespace-pre-wrap break-words">
                           {/* prefixo [tipo] só p/ mídia recebida — outbound já traz "[template] nome" do backend */}
                           {m.direction === "in" && m.type && m.type !== "text" ? `[${m.type}] ` : ""}
                           {m.body}
@@ -259,7 +274,7 @@ export default function Conversas() {
                     onKeyDown={onComposerKeyDown}
                     rows={1}
                     placeholder="Escreva uma mensagem… (Enter envia, Shift+Enter quebra linha)"
-                    className="flex-1 resize-none rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+                    className="min-w-0 flex-1 resize-none rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 sm:py-2"
                   />
                   <button
                     onClick={enviar}
@@ -271,11 +286,11 @@ export default function Conversas() {
                   </button>
                 </div>
               ) : (
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-[12px] text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+                <div className="flex flex-col items-stretch justify-between gap-2 rounded-xl bg-amber-50 px-4 py-3 text-[12px] text-amber-800 dark:bg-amber-500/10 dark:text-amber-300 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
                   <span>Janela fechada — inicie a conversa com um template para poder responder.</span>
                   <button
                     onClick={() => setModalOpen(true)}
-                    className="shrink-0 rounded-lg bg-white px-3 py-1.5 text-[12px] font-semibold text-amber-800 shadow-sm dark:bg-zinc-900 dark:text-amber-300"
+                    className="w-full shrink-0 rounded-lg bg-white px-3 py-2.5 text-[12px] font-semibold text-amber-800 shadow-sm dark:bg-zinc-900 dark:text-amber-300 sm:w-auto sm:py-1.5"
                   >
                     Enviar template
                   </button>

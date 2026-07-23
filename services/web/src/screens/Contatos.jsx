@@ -13,6 +13,10 @@ import {
 
 const soDigitos = (v) => String(v ?? "").replace(/\D/g, "");
 
+// iniciais do avatar — reusado na lista de cards (mobile) e na tabela (desktop)
+const iniciais = (nome) =>
+  String(nome ?? "").split(" ").map((n) => n[0]).slice(0, 2).join("");
+
 // countdown "expira em Xh Ym" a partir de windowExpiresAt
 function expiraEm(iso) {
   if (!iso) return "";
@@ -51,11 +55,11 @@ function EditContactModal({ contato, onClose, onSaved }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-900/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+        className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 sm:max-w-sm sm:rounded-2xl sm:p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="mb-4 text-base font-semibold text-zinc-900 dark:text-white">Editar contato</h3>
@@ -64,13 +68,13 @@ function EditContactModal({ contato, onClose, onSaved }) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Nome"
-            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-base outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 sm:py-2 sm:text-sm"
           />
           <input
             value={tags}
             onChange={(e) => setTags(e.target.value)}
             placeholder="Tags (separadas por vírgula)"
-            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-base outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 sm:py-2 sm:text-sm"
           />
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-[12px] text-red-700 dark:bg-red-500/10 dark:text-red-300">
@@ -81,14 +85,14 @@ function EditContactModal({ contato, onClose, onSaved }) {
         <div className="mt-5 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="rounded-xl border border-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-600 dark:border-zinc-800 dark:text-zinc-300"
+            className="flex-1 rounded-xl border border-zinc-200 px-3.5 py-2.5 text-sm font-medium text-zinc-600 dark:border-zinc-800 dark:text-zinc-300 sm:flex-none sm:py-2"
           >
             Cancelar
           </button>
           <button
             onClick={save}
             disabled={pending}
-            className="rounded-xl px-3.5 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            className="flex-1 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-white disabled:opacity-60 sm:flex-none sm:py-2"
             style={{ backgroundColor: "#0F8C5A" }}
           >
             {pending ? "Salvando…" : "Salvar"}
@@ -121,48 +125,51 @@ export function ImportModal({ onClose, onImported }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-900/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-xl rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+        className="flex max-h-[92vh] w-full flex-col rounded-t-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 sm:max-w-xl sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* cabeçalho */}
-        <div className="flex items-center justify-between border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
-          <div>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-100 px-4 py-4 dark:border-zinc-800 sm:px-6">
+          <div className="min-w-0">
             <h3 className="text-base font-semibold text-zinc-900 dark:text-white">Importar contatos</h3>
             <p className="text-[13px] text-zinc-500 dark:text-zinc-400">Arquivos CSV, JSON ou XLSX até 20 MB</p>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+          <button
+            onClick={onClose}
+            aria-label="Fechar"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 sm:h-8 sm:w-8"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="space-y-5 p-6">
+        <div className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
           {/* área de upload */}
-          <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-9 text-center dark:border-zinc-700 dark:bg-zinc-800/30">
+          {/* no mobile a área inteira é o alvo de toque que abre o seletor de arquivo */}
+          <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-zinc-200 bg-zinc-50/60 px-4 py-8 text-center dark:border-zinc-700 dark:bg-zinc-800/30 sm:px-6 sm:py-9">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-[#0F8C5A] dark:bg-emerald-500/10 dark:text-emerald-300">
               <Upload className="h-6 w-6" />
             </div>
             <p className="mt-3 text-sm font-medium text-zinc-700 dark:text-zinc-200">
               Arraste o arquivo aqui ou{" "}
-              <label className="cursor-pointer text-[#0F8C5A] dark:text-emerald-300">
-                selecione
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept=".csv,.json,.xlsx"
-                  className="sr-only"
-                />
-              </label>
+              <span className="text-[#0F8C5A] dark:text-emerald-300">selecione</span>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".csv,.json,.xlsx"
+                className="sr-only"
+              />
             </p>
-            <div className="mt-3 flex items-center gap-2 text-[11px] text-zinc-400">
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-[11px] text-zinc-400">
               <span className="inline-flex items-center gap-1"><FileSpreadsheet className="h-3.5 w-3.5" /> CSV</span>
               <span className="inline-flex items-center gap-1"><FileJson className="h-3.5 w-3.5" /> JSON</span>
               <span className="inline-flex items-center gap-1"><FileSpreadsheet className="h-3.5 w-3.5" /> XLSX</span>
             </div>
-          </div>
+          </label>
 
           {/* resultado da importação */}
           {result && (
@@ -209,9 +216,9 @@ export function ImportModal({ onClose, onImported }) {
                     name="base"
                     checked={base === o.v}
                     onChange={() => setBase(o.v)}
-                    className="mt-0.5 accent-[#0F8C5A]"
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-[#0F8C5A]"
                   />
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-[13px] font-medium text-zinc-800 dark:text-zinc-100">{o.t}</div>
                     <div className="text-[12px] text-zinc-500 dark:text-zinc-400">{o.d}</div>
                   </div>
@@ -228,7 +235,7 @@ export function ImportModal({ onClose, onImported }) {
             <select
               value={source}
               onChange={(e) => setSource(e.target.value)}
-              className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+              className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-base text-zinc-700 outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 sm:py-2 sm:text-sm"
             >
               <option value="cadastro_loja">Cadastro na loja</option>
               <option value="formulario_web">Formulário web</option>
@@ -240,18 +247,18 @@ export function ImportModal({ onClose, onImported }) {
         </div>
 
         {/* rodapé */}
-        <div className="flex items-center justify-between gap-3 border-t border-zinc-100 px-6 py-4 dark:border-zinc-800">
-          <span className="inline-flex items-center gap-1.5 text-[11px] text-zinc-400">
-            <Info className="h-3.5 w-3.5" /> Inválidos e duplicados são ignorados na importação.
+        <div className="flex shrink-0 flex-col-reverse gap-3 border-t border-zinc-100 px-4 py-4 dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <span className="inline-flex items-start gap-1.5 text-[11px] text-zinc-400">
+            <Info className="h-3.5 w-3.5 shrink-0" /> Inválidos e duplicados são ignorados na importação.
           </span>
           <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="rounded-xl border border-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="flex-1 rounded-xl border border-zinc-200 px-3.5 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:flex-none sm:py-2"
             >
               Cancelar
             </button>
-            <PrimaryBtn onClick={onSubmit} disabled={imp.pending}>
+            <PrimaryBtn className="flex-1 sm:flex-none" onClick={onSubmit} disabled={imp.pending}>
               {imp.pending ? (
                 "Importando…"
               ) : result ? (
@@ -326,12 +333,12 @@ export default function Contatos({ openImport, reloadKey }) {
     reload();
   }
 
-  const sel = (v, set, opts, ph) => (
-    <div className="relative">
+  const sel = (v, set, opts, ph, cls = "") => (
+    <div className={`relative w-full sm:w-auto ${cls}`}>
       <select
         value={v}
         onChange={(e) => set(e.target.value)}
-        className="appearance-none rounded-xl border border-zinc-200 bg-white py-2 pl-3 pr-8 text-sm text-zinc-600 outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+        className="w-full appearance-none rounded-xl border border-zinc-200 bg-white py-2.5 pl-3 pr-8 text-base text-zinc-600 outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 sm:w-auto sm:py-2 sm:text-sm"
       >
         <option value="">{ph}</option>
         {opts.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -340,24 +347,85 @@ export default function Contatos({ openImport, reloadKey }) {
     </div>
   );
 
+  // 🟢 janela de 24h aberta — reusado nos cards (mobile) e na tabela (desktop)
+  const janelaBadge = (c) =>
+    janelaPorTelefone.has(soDigitos(c.tel)) ? (
+      <span
+        className="text-[11px] leading-none"
+        title={`Janela aberta — ${expiraEm(janelaPorTelefone.get(soDigitos(c.tel)))}`}
+      >
+        🟢
+      </span>
+    ) : null;
+
+  // Ações por contato — `grande` usa alvos de 40px para o dedo (mobile);
+  // no desktop mantém os botões compactos alinhados à direita da linha.
+  const acoes = (c, grande = false) => {
+    const box = grande
+      ? "flex h-10 w-10 items-center justify-center rounded-lg"
+      : "rounded-lg p-1.5";
+    return (
+      <div className={`flex items-center gap-1 ${grande ? "" : "justify-end"}`}>
+        <button
+          title="Enviar mensagem"
+          aria-label="Enviar mensagem"
+          disabled={c.consent === "optout"}
+          onClick={() => setMensagemPara(c)}
+          className={`${box} text-zinc-400 transition-colors hover:bg-emerald-50 hover:text-[#0F8C5A] disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-emerald-500/10`}
+        >
+          <MessageSquare className="h-4 w-4" />
+        </button>
+        <button
+          title="Marcar opt-out (descadastrar dos disparos)"
+          aria-label="Marcar opt-out"
+          disabled={c.consent === "optout"}
+          onClick={() => onOptOut(c)}
+          className={`${box} text-zinc-400 transition-colors hover:bg-amber-50 hover:text-amber-600 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-amber-500/10`}
+        >
+          <BellOff className="h-4 w-4" />
+        </button>
+        <button
+          title="Editar"
+          aria-label="Editar"
+          onClick={() => setEditing(c)}
+          className={`${box} text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800`}
+        >
+          <Edit2 className="h-4 w-4" />
+        </button>
+        <button
+          title="Remover"
+          aria-label="Remover"
+          onClick={() => onRemove(c)}
+          className={`${box} text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10`}
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  };
+
   return (
-    <div className="space-y-4 p-7">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative min-w-[240px] flex-1">
+    <div className="space-y-4 p-4 sm:p-6 lg:p-7">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="relative w-full sm:min-w-[240px] sm:flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Buscar por nome, telefone ou DDD…"
-            className="w-full rounded-xl border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none placeholder:text-zinc-400 focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+            className="w-full rounded-xl border border-zinc-200 bg-white py-2.5 pl-9 pr-3 text-base outline-none placeholder:text-zinc-400 focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 sm:py-2 sm:text-sm"
           />
         </div>
-        <div className="flex items-center gap-1.5 text-zinc-400"><Filter className="h-4 w-4" /></div>
-        {sel(regiao, setRegiao, regioes, "Região / DDD")}
-        {sel(tag, setTag, tags, "Tag")}
-        {sel(consent, setConsent, ["consentido", "pendente", "optout"], "Consentimento")}
-        <div className="ml-auto" />
-        <PrimaryBtn onClick={openImport}><Upload className="h-4 w-4" /> Importar contatos</PrimaryBtn>
+        <div className="hidden items-center gap-1.5 text-zinc-400 sm:flex"><Filter className="h-4 w-4" /></div>
+        {/* no mobile os filtros viram uma grade de 2 colunas; do sm pra cima `contents`
+            devolve os selects ao flex do pai, preservando o layout do desktop */}
+        <div className="grid grid-cols-2 gap-2 sm:contents">
+          {sel(regiao, setRegiao, regioes, "Região / DDD")}
+          {sel(tag, setTag, tags, "Tag")}
+          {sel(consent, setConsent, ["consentido", "pendente", "optout"], "Consentimento", "col-span-2 sm:col-span-1")}
+        </div>
+        <div className="hidden sm:block sm:ml-auto" />
+        <PrimaryBtn className="w-full sm:w-auto" onClick={openImport}><Upload className="h-4 w-4" /> Importar contatos</PrimaryBtn>
       </div>
 
       {/* estados de carregamento e erro */}
@@ -365,9 +433,9 @@ export default function Contatos({ openImport, reloadKey }) {
         <div className="py-8 text-center text-sm text-zinc-400">Carregando contatos…</div>
       )}
       {error && !loading && (
-        <div className="flex items-center justify-between rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
-          <span>{error.message || "Erro ao carregar contatos."}</span>
-          <button onClick={reload} className="ml-4 rounded-lg border border-red-300 px-3 py-1 text-xs font-medium hover:bg-red-100 dark:border-red-500/30 dark:hover:bg-red-500/20">
+        <div className="flex flex-col gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
+          <span className="break-words">{error.message || "Erro ao carregar contatos."}</span>
+          <button onClick={reload} className="shrink-0 self-start rounded-lg border border-red-300 px-3 py-2 text-xs font-medium hover:bg-red-100 dark:border-red-500/30 dark:hover:bg-red-500/20 sm:ml-4 sm:self-auto sm:py-1">
             Tentar novamente
           </button>
         </div>
@@ -375,16 +443,55 @@ export default function Contatos({ openImport, reloadKey }) {
 
       {!loading && (
         <Card className="overflow-hidden">
-          <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-3 text-[13px] dark:border-zinc-800">
+          <div className="flex flex-col gap-1.5 border-b border-zinc-100 px-4 py-3 text-[13px] dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <span className="text-zinc-500 dark:text-zinc-400">
               <span className="font-semibold text-zinc-700 dark:text-zinc-200">{filtrados.length}</span> contatos
             </span>
-            <span className="inline-flex items-center gap-1.5 text-zinc-400">
-              <ShieldCheck className="h-3.5 w-3.5 text-[#0F8C5A]" />
+            <span className="inline-flex items-start gap-1.5 text-[12px] text-zinc-400 sm:items-center sm:text-[13px]">
+              <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#0F8C5A] sm:mt-0" />
               Suprimidos por opt-out são ocultados de disparos automaticamente
             </span>
           </div>
-          <div className="overflow-x-auto">
+
+          {/* Mobile: lista de cards — muito melhor no dedo que rolagem lateral */}
+          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800/60 lg:hidden">
+            {filtrados.map((c) => (
+              <li key={c.id} className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300">
+                    {iniciais(c.nome)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-zinc-800 dark:text-zinc-100">{c.nome}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[12px] tabular-nums text-zinc-400">{c.tel}</span>
+                      {janelaBadge(c)}
+                    </div>
+                  </div>
+                  <div className="shrink-0"><ConsentChip consent={c.consent} /></div>
+                </div>
+
+                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[12px] text-zinc-600 dark:text-zinc-300">
+                  <span>DDD {c.ddd} · <span className="text-zinc-400">{c.regiao}</span></span>
+                  <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                    {c.tag}
+                  </span>
+                </div>
+
+                <div className="mt-2 border-t border-zinc-100 pt-2 dark:border-zinc-800/60">
+                  {acoes(c, true)}
+                </div>
+              </li>
+            ))}
+            {filtrados.length === 0 && (
+              <li className="px-4 py-12 text-center text-sm text-zinc-400">
+                Nenhum contato encontrado com esses filtros.
+              </li>
+            )}
+          </ul>
+
+          {/* Desktop: tabela completa */}
+          <div className="hidden overflow-x-auto lg:block">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-zinc-100 bg-zinc-50/60 text-left text-[11px] uppercase tracking-wide text-zinc-400 dark:border-zinc-800 dark:bg-zinc-800/40">
@@ -404,20 +511,13 @@ export default function Contatos({ openImport, reloadKey }) {
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300">
-                          {c.nome.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+                          {iniciais(c.nome)}
                         </div>
                         <div>
                           <div className="font-medium text-zinc-800 dark:text-zinc-100">{c.nome}</div>
                           <div className="flex items-center gap-1.5">
                             <span className="text-[12px] tabular-nums text-zinc-400">{c.tel}</span>
-                            {janelaPorTelefone.has(soDigitos(c.tel)) && (
-                              <span
-                                className="text-[11px] leading-none"
-                                title={`Janela aberta — ${expiraEm(janelaPorTelefone.get(soDigitos(c.tel)))}`}
-                              >
-                                🟢
-                              </span>
-                            )}
+                            {janelaBadge(c)}
                           </div>
                         </div>
                       </div>
@@ -431,40 +531,7 @@ export default function Contatos({ openImport, reloadKey }) {
                       </span>
                     </td>
                     <td className="px-3 py-3"><ConsentChip consent={c.consent} /></td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          title="Enviar mensagem"
-                          disabled={c.consent === "optout"}
-                          onClick={() => setMensagemPara(c)}
-                          className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-emerald-50 hover:text-[#0F8C5A] disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-emerald-500/10"
-                        >
-                          <MessageSquare className="h-4 w-4" />
-                        </button>
-                        <button
-                          title="Marcar opt-out (descadastrar dos disparos)"
-                          disabled={c.consent === "optout"}
-                          onClick={() => onOptOut(c)}
-                          className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-amber-50 hover:text-amber-600 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-amber-500/10"
-                        >
-                          <BellOff className="h-4 w-4" />
-                        </button>
-                        <button
-                          title="Editar"
-                          onClick={() => setEditing(c)}
-                          className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"
-                        >
-                          <Edit2 className="h-4 w-4" />
-                        </button>
-                        <button
-                          title="Remover"
-                          onClick={() => onRemove(c)}
-                          className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
+                    <td className="px-5 py-3">{acoes(c)}</td>
                   </tr>
                 ))}
                 {filtrados.length === 0 && (

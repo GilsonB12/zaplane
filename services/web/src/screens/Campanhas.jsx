@@ -29,7 +29,7 @@ export default function Campanhas({ openCampaign }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center p-20 text-zinc-400">
+      <div className="flex items-center justify-center p-10 text-center text-zinc-400 sm:p-20">
         Carregando campanhas…
       </div>
     );
@@ -37,13 +37,13 @@ export default function Campanhas({ openCampaign }) {
 
   if (error) {
     return (
-      <div className="p-7">
-        <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-[13px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-300">
+      <div className="p-4 sm:p-6 lg:p-7">
+        <div className="flex flex-col items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-[13px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-300 sm:flex-row sm:items-center">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          <span>Erro ao carregar campanhas: {error.message || "falha na requisição."}</span>
+          <span className="min-w-0 break-words">Erro ao carregar campanhas: {error.message || "falha na requisição."}</span>
           <button
             onClick={reload}
-            className="ml-auto rounded-lg border border-red-200 px-3 py-1 text-xs font-medium hover:bg-red-100 dark:border-red-500/30 dark:hover:bg-red-500/10"
+            className="w-full shrink-0 rounded-lg border border-red-200 px-3 py-2 text-xs font-medium hover:bg-red-100 dark:border-red-500/30 dark:hover:bg-red-500/10 sm:ml-auto sm:w-auto sm:py-1"
           >
             Tentar novamente
           </button>
@@ -54,29 +54,29 @@ export default function Campanhas({ openCampaign }) {
 
   if (campanhas.length === 0) {
     return (
-      <div className="flex items-center justify-center p-20 text-zinc-400">
+      <div className="flex items-center justify-center p-10 text-center text-zinc-400 sm:p-20">
         Nenhuma campanha ainda.
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 p-7">
+    <div className="space-y-4 p-4 sm:p-6 lg:p-7">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {campanhas.map((c) => {
           const pct = c.total ? Math.round((c.enviadas / c.total) * 100) : 0;
           return (
-            <Card key={c.id} className="cursor-pointer p-5 transition-shadow hover:shadow-md">
+            <Card key={c.id} className="cursor-pointer p-4 transition-shadow hover:shadow-md sm:p-5">
               <div onClick={() => openCampaign(c.id)}>
-                <div className="flex items-start justify-between">
+                <div className="flex items-start justify-between gap-2">
                   <StatusBadge status={c.status} />
-                  <button className="rounded-lg p-1 text-zinc-300 hover:bg-zinc-100 hover:text-zinc-500 dark:hover:bg-zinc-800">
+                  <button className="-mr-1 -mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg p-1 text-zinc-300 hover:bg-zinc-100 hover:text-zinc-500 dark:hover:bg-zinc-800 sm:mr-0 sm:mt-0 sm:h-auto sm:w-auto">
                     <MoreVertical className="h-4 w-4" />
                   </button>
                 </div>
-                <h3 className="mt-3 text-[15px] font-semibold text-zinc-900 dark:text-white">{c.nome}</h3>
-                <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-zinc-400">
-                  {c.template} <CategoryTag cat={c.categoria} />
+                <h3 className="mt-3 break-words text-[15px] font-semibold text-zinc-900 dark:text-white">{c.nome}</h3>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-zinc-400">
+                  <span className="min-w-0 break-words">{c.template}</span> <CategoryTag cat={c.categoria} />
                 </div>
                 <div className="mt-4">
                   <div className="mb-1.5 flex items-center justify-between text-[12px]">
@@ -194,9 +194,9 @@ export function NovaCampanha({ setScreen, openCampaign }) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-7">
+    <div className="mx-auto max-w-3xl space-y-5 p-4 sm:space-y-6 sm:p-6 lg:p-7">
       {/* stepper */}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col items-stretch gap-2.5 sm:flex-row sm:items-center sm:gap-2">
         {steps.map((s, i) => {
           const n = i + 1;
           const done = step > n;
@@ -205,7 +205,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
             <React.Fragment key={s}>
               <div className="flex items-center gap-2">
                 <div
-                  className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition-colors ${
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors ${
                     active
                       ? "text-white"
                       : done
@@ -220,7 +220,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
                   {s}
                 </span>
               </div>
-              {i < steps.length - 1 && <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />}
+              {i < steps.length - 1 && <div className="hidden h-px flex-1 bg-zinc-200 dark:bg-zinc-800 sm:block" />}
             </React.Fragment>
           );
         })}
@@ -228,7 +228,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
 
       {/* STEP 1 — Público */}
       {step === 1 && (
-        <Card className="p-6">
+        <Card className="p-4 sm:p-6">
           <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Quem vai receber?</h2>
           <p className="text-[13px] text-zinc-500 dark:text-zinc-400">
             Escolha uma lista ou deixe em branco para enviar a todos os contatos da organização.
@@ -243,7 +243,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
               value={nome}
               onChange={(e) => setNome(e.target.value)}
               placeholder="Ex: Promoção de Julho"
-              className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[13px] outline-none focus:border-[#0F8C5A] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              className="h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[13px] outline-none focus:border-[#0F8C5A] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 sm:h-auto"
             />
           </div>
 
@@ -258,9 +258,9 @@ export function NovaCampanha({ setScreen, openCampaign }) {
                 type="radio"
                 checked={listId === ""}
                 onChange={() => setListId("")}
-                className="accent-[#0F8C5A]"
+                className="shrink-0 accent-[#0F8C5A]"
               />
-              <div className="flex-1">
+              <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Todos os contatos</div>
                 <div className="text-[12px] text-zinc-400">Envia para todos os contatos da organização com consentimento</div>
               </div>
@@ -281,10 +281,10 @@ export function NovaCampanha({ setScreen, openCampaign }) {
                   type="radio"
                   checked={listId === l.id}
                   onChange={() => setListId(l.id)}
-                  className="accent-[#0F8C5A]"
+                  className="shrink-0 accent-[#0F8C5A]"
                 />
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Lista · {l.name}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="break-words text-sm font-medium text-zinc-800 dark:text-zinc-100">Lista · {l.name}</div>
                   <div className="text-[12px] text-zinc-400">{l.type ?? "lista"}</div>
                 </div>
               </label>
@@ -302,7 +302,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
 
       {/* STEP 2 — Template */}
       {step === 2 && (
-        <Card className="p-6">
+        <Card className="p-4 sm:p-6">
           <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Escolha um template aprovado</h2>
           <p className="text-[13px] text-zinc-500 dark:text-zinc-400">
             Apenas templates com aprovação da Meta podem ser disparados.
@@ -324,7 +324,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
                 {templatesAprovados.map((t) => (
                   <label
                     key={t.id}
-                    className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition-colors ${
+                    className={`flex min-h-[52px] cursor-pointer items-center gap-3 rounded-xl border p-3 transition-colors sm:min-h-0 ${
                       tplIdEfetivo === t.id ? "border-[#0F8C5A] bg-emerald-50/40 dark:bg-emerald-500/5" : "border-zinc-200 dark:border-zinc-800"
                     }`}
                   >
@@ -332,10 +332,10 @@ export function NovaCampanha({ setScreen, openCampaign }) {
                       type="radio"
                       checked={tplIdEfetivo === t.id}
                       onChange={() => { setTemplateId(t.id); setValores({}); }}
-                      className="accent-[#0F8C5A]"
+                      className="shrink-0 accent-[#0F8C5A]"
                     />
-                    <div className="flex-1">
-                      <div className="text-[13px] font-medium text-zinc-800 dark:text-zinc-100">{t.nome}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="break-words text-[13px] font-medium text-zinc-800 dark:text-zinc-100">{t.nome}</div>
                       <div className="mt-0.5">
                         <CategoryTag cat={t.categoria} />
                       </div>
@@ -352,27 +352,29 @@ export function NovaCampanha({ setScreen, openCampaign }) {
                     <p className="mb-2.5 text-[11px] leading-snug text-zinc-400">
                       O texto tem espaços a preencher. Digite um valor (igual para todos)
                       ou use o <span className="font-medium">nome do contato</span> para
-                      personalizar por destinatário. Acompanhe na prévia ao lado.
+                      personalizar por destinatário. Acompanhe na prévia{" "}
+                      <span className="md:hidden">abaixo</span>
+                      <span className="hidden md:inline">ao lado</span>.
                     </p>
                     <div className="space-y-2.5">
                       {variaveis.map((n) => {
                         const usaNome = (valores[n] ?? "") === "{{name}}";
                         return (
                           <div key={n}>
-                            <div className="mb-1 text-[11px] text-zinc-400">
+                            <div className="mb-1 break-words text-[11px] text-zinc-400">
                               Variável <span className="font-mono font-medium text-zinc-500 dark:text-zinc-300">{`{{${n}}}`}</span>
                               {" · "}
                               <span className="italic">“{contextoDaVariavel(tpl.corpo, n)}”</span>
                             </div>
                             {usaNome ? (
-                              <div className="flex items-center justify-between rounded-lg border border-emerald-300/70 bg-emerald-50 px-2.5 py-1.5 text-[13px] font-medium text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
-                                <span className="inline-flex items-center gap-1.5">
-                                  <UserRound className="h-3.5 w-3.5" /> Nome do contato
+                              <div className="flex h-10 items-center justify-between gap-2 rounded-lg border border-emerald-300/70 bg-emerald-50 px-2.5 text-[13px] font-medium text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300 sm:h-auto sm:py-1.5">
+                                <span className="inline-flex min-w-0 items-center gap-1.5">
+                                  <UserRound className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">Nome do contato</span>
                                 </span>
                                 <button
                                   title="Voltar a digitar um valor fixo"
                                   onClick={() => setValores((v) => ({ ...v, [n]: "" }))}
-                                  className="rounded p-0.5 text-emerald-600 hover:bg-emerald-100 dark:text-emerald-300 dark:hover:bg-emerald-500/20"
+                                  className="-mr-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded text-emerald-600 hover:bg-emerald-100 dark:text-emerald-300 dark:hover:bg-emerald-500/20 sm:mr-0 sm:h-auto sm:w-auto sm:p-0.5"
                                 >
                                   <X className="h-3.5 w-3.5" />
                                 </button>
@@ -383,12 +385,12 @@ export function NovaCampanha({ setScreen, openCampaign }) {
                                   value={valores[n] ?? ""}
                                   onChange={(e) => setValores((v) => ({ ...v, [n]: e.target.value }))}
                                   placeholder="Digite o valor…"
-                                  className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[13px] outline-none focus:border-[#0F8C5A] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                                  className="h-10 w-full min-w-0 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[13px] outline-none focus:border-[#0F8C5A] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 sm:h-auto"
                                 />
                                 <button
                                   title="Usar o nome de cada contato (personalizado)"
                                   onClick={() => setValores((v) => ({ ...v, [n]: "{{name}}" }))}
-                                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-zinc-200 px-2 text-[11px] font-medium text-zinc-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-300"
+                                  className="inline-flex h-10 shrink-0 items-center gap-1 rounded-lg border border-zinc-200 px-2.5 text-[11px] font-medium text-zinc-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-300 sm:h-auto sm:px-2"
                                 >
                                   <UserRound className="h-3.5 w-3.5" /> Nome
                                 </button>
@@ -422,7 +424,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
 
       {/* STEP 3 — Revisão */}
       {step === 3 && (
-        <Card className="p-6">
+        <Card className="p-4 sm:p-6">
           <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Revisão e disparo</h2>
           <p className="text-[13px] text-zinc-500 dark:text-zinc-400">Confira os detalhes antes de confirmar.</p>
           <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2">
@@ -440,10 +442,10 @@ export function NovaCampanha({ setScreen, openCampaign }) {
               ].map(([k, v]) => (
                 <div
                   key={k}
-                  className="flex items-center justify-between border-b border-zinc-100 pb-2.5 text-[13px] last:border-0 dark:border-zinc-800"
+                  className="flex flex-col gap-0.5 border-b border-zinc-100 pb-2.5 text-[13px] last:border-0 dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
                 >
-                  <span className="text-zinc-500 dark:text-zinc-400">{k}</span>
-                  <span className="font-medium text-zinc-800 dark:text-zinc-100">{v}</span>
+                  <span className="shrink-0 text-zinc-500 dark:text-zinc-400">{k}</span>
+                  <span className="min-w-0 break-words font-medium text-zinc-800 dark:text-zinc-100 sm:text-right">{v}</span>
                 </div>
               ))}
 
@@ -454,36 +456,36 @@ export function NovaCampanha({ setScreen, openCampaign }) {
 
               {/* Custo Meta vs taxa Zaplane — dois números de origens distintas (spec §7) */}
               <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3.5 dark:border-zinc-800 dark:bg-zinc-800/40">
-                <div className="flex items-center justify-between text-[12px]">
-                  <span className="text-zinc-500 dark:text-zinc-400">Custo Meta (estimado)</span>
-                  <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                <div className="flex flex-col gap-0.5 text-[12px] sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                  <span className="shrink-0 text-zinc-500 dark:text-zinc-400">Custo Meta (estimado)</span>
+                  <span className="min-w-0 break-words font-medium text-zinc-800 dark:text-zinc-100 sm:text-right">
                     Cobrado direto pela Meta, por mensagem entregue
                   </span>
                 </div>
-                <div className="mt-1.5 flex items-center justify-between text-[12px]">
-                  <span className="text-zinc-500 dark:text-zinc-400">Taxa Zaplane (estimada)</span>
-                  <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                <div className="mt-1.5 flex flex-col gap-0.5 text-[12px] sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                  <span className="shrink-0 text-zinc-500 dark:text-zinc-400">Taxa Zaplane (estimada)</span>
+                  <span className="min-w-0 break-words font-medium text-zinc-800 dark:text-zinc-100 sm:text-right">
                     {taxaZaplaneEstimadaCents != null
                       ? `${formatBRL(taxaZaplaneEstimadaCents)} (${estimativaDestinatarios.toLocaleString("pt-BR")} × R$ 0,43)`
                       : "R$ 0,43 por mensagem elegível — total exato após confirmar"}
                   </span>
                 </div>
-                <div className="mt-1.5 flex items-center justify-between text-[12px]">
-                  <span className="text-zinc-500 dark:text-zinc-400">Saldo atual de créditos</span>
+                <div className="mt-1.5 flex flex-col gap-0.5 text-[12px] sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                  <span className="shrink-0 text-zinc-500 dark:text-zinc-400">Saldo atual de créditos</span>
                   <span className="inline-flex items-center gap-1 font-medium text-zinc-800 dark:text-zinc-100">
-                    <Wallet className="h-3.5 w-3.5 text-zinc-400" />
+                    <Wallet className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
                     {saldoCents != null ? formatBRL(saldoCents) : "—"}
                   </span>
                 </div>
               </div>
 
               {saldoInsuficiente && (
-                <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-[12px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-300">
+                <div className="mt-3 flex flex-wrap items-start gap-x-2 gap-y-1 rounded-xl border border-red-200 bg-red-50 p-3 text-[12px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-300">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span className="flex-1">Créditos insuficientes — compre créditos antes de disparar.</span>
+                  <span className="min-w-[10rem] flex-1 break-words">Créditos insuficientes — compre créditos antes de disparar.</span>
                   <button
                     onClick={() => setScreen("config")}
-                    className="shrink-0 font-semibold underline underline-offset-2"
+                    className="inline-flex min-h-[40px] shrink-0 items-center font-semibold underline underline-offset-2 sm:min-h-0"
                   >
                     Ir para billing
                   </button>
@@ -491,9 +493,9 @@ export function NovaCampanha({ setScreen, openCampaign }) {
               )}
 
               {erroCriacao && (
-                <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-[12px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-300">
-                  <AlertTriangle className="h-4 w-4 shrink-0" />
-                  {erroCriacao}
+                <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-[12px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-300 sm:items-center">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 sm:mt-0" />
+                  <span className="min-w-0 break-words">{erroCriacao}</span>
                 </div>
               )}
             </div>
@@ -509,10 +511,10 @@ export function NovaCampanha({ setScreen, openCampaign }) {
       )}
 
       {/* footer nav */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col-reverse items-stretch gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <button
           onClick={() => (step === 1 ? setScreen("campanhas") : setStep(step - 1))}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-zinc-200 px-3.5 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:justify-start sm:py-2"
         >
           <ChevronLeft className="h-4 w-4" /> {step === 1 ? "Cancelar" : "Voltar"}
         </button>
@@ -521,6 +523,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
           <PrimaryBtn
             onClick={() => setStep(step + 1)}
             disabled={step === 2 && (templatesAprovados.length === 0 || !todasPreenchidas)}
+            className="w-full sm:w-auto"
           >
             Continuar <ChevronRight className="h-4 w-4" />
           </PrimaryBtn>
@@ -528,6 +531,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
           <PrimaryBtn
             onClick={confirmar}
             disabled={create.pending || !tplIdEfetivo}
+            className="w-full sm:w-auto"
           >
             <Send className="h-4 w-4" />
             {create.pending ? "Criando…" : "Confirmar disparo"}
@@ -554,7 +558,7 @@ export function CampanhaDetalhe({ campaignId, setScreen }) {
 
   if (loading && !live) {
     return (
-      <div className="flex items-center justify-center p-20 text-zinc-400">
+      <div className="flex items-center justify-center p-10 text-center text-zinc-400 sm:p-20">
         Carregando campanha…
       </div>
     );
@@ -562,19 +566,19 @@ export function CampanhaDetalhe({ campaignId, setScreen }) {
 
   if (error && !live) {
     return (
-      <div className="p-7">
+      <div className="p-4 sm:p-6 lg:p-7">
         <button
           onClick={() => setScreen("campanhas")}
-          className="mb-4 inline-flex items-center gap-1 text-[13px] font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100"
+          className="mb-4 inline-flex h-10 items-center gap-1 text-[13px] font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100 sm:h-auto"
         >
           <ChevronLeft className="h-4 w-4" /> Campanhas
         </button>
-        <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-[13px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-300">
+        <div className="flex flex-col items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-[13px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-300 sm:flex-row sm:items-center">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          <span>Erro ao carregar campanha: {error.message || "falha na requisição."}</span>
+          <span className="min-w-0 break-words">Erro ao carregar campanha: {error.message || "falha na requisição."}</span>
           <button
             onClick={reload}
-            className="ml-auto rounded-lg border border-red-200 px-3 py-1 text-xs font-medium hover:bg-red-100 dark:border-red-500/30 dark:hover:bg-red-500/10"
+            className="w-full shrink-0 rounded-lg border border-red-200 px-3 py-2 text-xs font-medium hover:bg-red-100 dark:border-red-500/30 dark:hover:bg-red-500/10 sm:ml-auto sm:w-auto sm:py-1"
           >
             Tentar novamente
           </button>
@@ -622,33 +626,33 @@ export function CampanhaDetalhe({ campaignId, setScreen }) {
   ];
 
   return (
-    <div className="space-y-6 p-7">
+    <div className="space-y-5 p-4 sm:space-y-6 sm:p-6 lg:p-7">
       <button
         onClick={() => setScreen("campanhas")}
-        className="inline-flex items-center gap-1 text-[13px] font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100"
+        className="inline-flex h-10 items-center gap-1 text-[13px] font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100 sm:h-auto"
       >
         <ChevronLeft className="h-4 w-4" /> Campanhas
       </button>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-white">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <h1 className="min-w-0 break-words text-lg font-semibold tracking-tight text-zinc-900 dark:text-white sm:text-xl">
               {live?.nome ?? "—"}
             </h1>
             {live && <StatusBadge status={live.status} />}
           </div>
-          <p className="mt-0.5 text-[13px] text-zinc-500 dark:text-zinc-400">
+          <p className="mt-0.5 break-words text-[13px] text-zinc-500 dark:text-zinc-400">
             {live?.template ?? "—"} · <CategoryTag cat={live?.categoria ?? "Marketing"} /> · iniciada {live?.quando ?? "—"}
           </p>
         </div>
 
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
           <div className="flex items-center gap-2">
             <button
               onClick={reload}
               disabled={loading}
-              className="rounded-xl border border-zinc-200 px-3.5 py-2 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 disabled:opacity-50"
+              className="h-10 flex-1 rounded-xl border border-zinc-200 px-3.5 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 disabled:opacity-50 sm:h-auto sm:flex-none sm:py-2"
             >
               {loading ? "Atualizando…" : "Atualizar"}
             </button>
@@ -657,7 +661,7 @@ export function CampanhaDetalhe({ campaignId, setScreen }) {
               <button
                 onClick={onCancel}
                 disabled={cancel.pending}
-                className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2 text-[13px] font-medium text-red-700 hover:bg-red-100 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-300 dark:hover:bg-red-500/10 disabled:opacity-50"
+                className="h-10 flex-1 rounded-xl border border-red-200 bg-red-50 px-3.5 text-[13px] font-medium text-red-700 hover:bg-red-100 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-300 dark:hover:bg-red-500/10 disabled:opacity-50 sm:h-auto sm:flex-none sm:py-2"
               >
                 {cancel.pending ? "Cancelando…" : "Cancelar"}
               </button>
@@ -671,9 +675,9 @@ export function CampanhaDetalhe({ campaignId, setScreen }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
         {metrics.map((m) => (
-          <Card key={m.k} className="p-5">
+          <Card key={m.k} className="p-4 sm:p-5">
             <div className="text-[13px] text-zinc-500 dark:text-zinc-400">{m.k}</div>
             <div
               className="mt-1 text-2xl font-semibold tabular-nums tracking-tight"
@@ -692,17 +696,17 @@ export function CampanhaDetalhe({ campaignId, setScreen }) {
       </div>
 
       {(live?.custoEstimadoCents != null || live?.taxaZaplaneEstimadaCents != null) && (
-        <Card className="p-5">
+        <Card className="p-4 sm:p-5">
           <h2 className="mb-3 text-sm font-semibold text-zinc-900 dark:text-white">Custo do disparo</h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="rounded-xl bg-zinc-50 p-4 dark:bg-zinc-800/40">
+            <div className="rounded-xl bg-zinc-50 p-3.5 dark:bg-zinc-800/40 sm:p-4">
               <div className="text-[11px] text-zinc-400">Custo Meta (estimado)</div>
               <div className="mt-0.5 text-lg font-semibold text-zinc-900 dark:text-white">
                 {formatBRL(live.custoEstimadoCents)}
               </div>
               <div className="mt-0.5 text-[11px] text-zinc-400">Cobrado direto pela Meta, por mensagem entregue</div>
             </div>
-            <div className="rounded-xl bg-zinc-50 p-4 dark:bg-zinc-800/40">
+            <div className="rounded-xl bg-zinc-50 p-3.5 dark:bg-zinc-800/40 sm:p-4">
               <div className="text-[11px] text-zinc-400">Taxa Zaplane (estimada)</div>
               <div className="mt-0.5 text-lg font-semibold text-zinc-900 dark:text-white">
                 {formatBRL(live.taxaZaplaneEstimadaCents)}
@@ -714,7 +718,7 @@ export function CampanhaDetalhe({ campaignId, setScreen }) {
       )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="p-5 lg:col-span-2">
+        <Card className="p-4 sm:p-5 lg:col-span-2">
           <h2 className="mb-4 text-sm font-semibold text-zinc-900 dark:text-white">Timeline</h2>
           <div className="space-y-1">
             {timeline.map((item, i) => {
@@ -734,12 +738,12 @@ export function CampanhaDetalhe({ campaignId, setScreen }) {
                       <div className="my-1 w-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
                     )}
                   </div>
-                  <div className="pb-5">
-                    <div className="flex items-center gap-2">
+                  <div className="min-w-0 pb-5">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="text-[13px] font-medium text-zinc-800 dark:text-zinc-100">{item.label}</span>
                       <span className="text-[11px] text-zinc-400">{item.t}</span>
                     </div>
-                    <p className="text-[12px] text-zinc-500 dark:text-zinc-400">{item.desc}</p>
+                    <p className="break-words text-[12px] text-zinc-500 dark:text-zinc-400">{item.desc}</p>
                   </div>
                 </div>
               );
@@ -747,15 +751,15 @@ export function CampanhaDetalhe({ campaignId, setScreen }) {
           </div>
         </Card>
 
-        <Card className="p-5">
+        <Card className="p-4 sm:p-5">
           <h2 className="mb-4 text-sm font-semibold text-zinc-900 dark:text-white">Conformidade</h2>
           <div className="space-y-3 text-[13px]">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
               <span className="text-zinc-500 dark:text-zinc-400">Base legal</span>
               <span className="font-medium text-zinc-800 dark:text-zinc-100">Consentimento</span>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-zinc-500 dark:text-zinc-400">Opt-out na mensagem</span>
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-0 text-zinc-500 dark:text-zinc-400">Opt-out na mensagem</span>
               <span className="inline-flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
                 <Check className="h-3.5 w-3.5" /> Incluído
               </span>

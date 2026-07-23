@@ -31,21 +31,31 @@ function AppShell() {
   const [importOpen, setImportOpen] = useState(false);
   const [campaignId, setCampaignId] = useState(null);
   const [contactsReload, setContactsReload] = useState(0);
+  const [navOpen, setNavOpen] = useState(false);
 
-  const openCampaign = (id) => { setCampaignId(id); setScreen("campanha-detalhe"); };
+  const openCampaign = (id) => { setCampaignId(id); setScreen("campanha-detalhe"); setNavOpen(false); };
   const [title, subtitle] = TITLES[screen] || TITLES.dashboard;
 
+  // Esc fecha o menu mobile; trava o scroll do fundo enquanto ele está aberto.
+  React.useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") setNavOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [navOpen]);
+
+  // O rótulo some no mobile: o ícone já diz o que o botão faz, e sobra espaço no topo.
   const topActions =
-    screen === "campanhas" ? <PrimaryBtn onClick={() => setScreen("nova")}><Plus className="h-4 w-4" /> Nova campanha</PrimaryBtn> :
-    screen === "dashboard" ? <PrimaryBtn onClick={() => setScreen("nova")}><Send className="h-4 w-4" /> Disparar campanha</PrimaryBtn> :
+    screen === "campanhas" ? <PrimaryBtn onClick={() => setScreen("nova")}><Plus className="h-4 w-4" /><span className="hidden sm:inline">Nova campanha</span></PrimaryBtn> :
+    screen === "dashboard" ? <PrimaryBtn onClick={() => setScreen("nova")}><Send className="h-4 w-4" /><span className="hidden sm:inline">Disparar campanha</span></PrimaryBtn> :
     null;
 
   return (
     <div className={dark ? "dark" : ""}>
       <div className="flex h-screen overflow-hidden bg-zinc-50 font-sans text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
-        <Sidebar screen={screen} setScreen={(s) => { setScreen(s); }} />
+        <Sidebar screen={screen} setScreen={setScreen} open={navOpen} onClose={() => setNavOpen(false)} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <Topbar title={title} subtitle={subtitle} dark={dark} setDark={setDark} actions={topActions} onLogout={logout} />
+          <Topbar title={title} subtitle={subtitle} dark={dark} setDark={setDark} actions={topActions} onLogout={logout} onMenu={() => setNavOpen(true)} />
           <main className="flex-1 overflow-y-auto">
             {screen === "dashboard" && <Dashboard setScreen={setScreen} openCampaign={openCampaign} />}
             {screen === "contatos" && <Contatos openImport={() => setImportOpen(true)} reloadKey={contactsReload} />}

@@ -59,34 +59,34 @@ export default function ConectarManualModal({ onClose, onConnected }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 p-4 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-900/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={onClose}>
       <div
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+        className="flex max-h-[92vh] w-full flex-col rounded-t-2xl border border-zinc-200 bg-white shadow-2xl sm:max-h-[90vh] sm:max-w-2xl sm:rounded-2xl dark:border-zinc-800 dark:bg-zinc-900"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
-          <div>
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-zinc-100 px-4 py-4 sm:items-center sm:px-6 dark:border-zinc-800">
+          <div className="min-w-0">
             <h3 className="text-base font-semibold text-zinc-900 dark:text-white">Conectar manualmente</h3>
-            <p className="text-[13px] text-zinc-500 dark:text-zinc-400">Cole as credenciais geradas no Meta Business Suite / for Developers.</p>
+            <p className="text-[13px] text-zinc-500 break-words dark:text-zinc-400">Cole as credenciais geradas no Meta Business Suite / for Developers.</p>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+          <button onClick={onClose} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 sm:h-8 sm:w-8 dark:hover:bg-zinc-800">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="space-y-4 p-6">
+        <div className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
           {/* Guia colapsável */}
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-800">
             <button
               onClick={() => setGuiaAberta((v) => !v)}
-              className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[13px] font-medium text-zinc-600 dark:text-zinc-300"
+              className="flex w-full items-center gap-2 px-3.5 py-3 text-left text-[13px] font-medium text-zinc-600 sm:py-2.5 dark:text-zinc-300"
             >
               <Info className="h-4 w-4 shrink-0 text-sky-500" />
               Onde encontro esses valores?
               <ChevronDown className={`ml-auto h-4 w-4 shrink-0 transition-transform ${guiaAberta ? "rotate-180" : ""}`} />
             </button>
             {guiaAberta && (
-              <div className="space-y-2 border-t border-zinc-100 px-3.5 py-3 text-[12px] leading-relaxed text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+              <div className="space-y-2 border-t border-zinc-100 px-3.5 py-3 text-[12px] leading-relaxed break-words text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
                 <p><strong className="text-zinc-700 dark:text-zinc-200">Phone Number ID e WABA ID:</strong> no Meta for Developers, dentro do seu app → WhatsApp → Configuração da API (API Setup). Os dois números aparecem no topo da página.</p>
                 <p><strong className="text-zinc-700 dark:text-zinc-200">Token de acesso:</strong> gere um token de <em>System User</em> permanente em Meta Business Suite → Configurações do negócio → Usuários do sistema, com os escopos <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">whatsapp_business_messaging</code> e <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">whatsapp_business_management</code>.</p>
                 <p><strong className="text-zinc-700 dark:text-zinc-200">App ID e App Secret:</strong> Meta for Developers → seu app → Configurações → Básico.</p>
@@ -95,9 +95,9 @@ export default function ConectarManualModal({ onClose, onConnected }) {
           </div>
 
           {/* Campos */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {CAMPOS.map((c) => (
-              <div key={c.key} className={c.full ? "sm:col-span-2" : ""}>
+              <div key={c.key} className={`min-w-0 ${c.full ? "md:col-span-2" : ""}`}>
                 <label className="mb-1 block text-[12px] font-medium text-zinc-600 dark:text-zinc-300">{c.label}</label>
                 <input
                   type={c.type}
@@ -105,7 +105,7 @@ export default function ConectarManualModal({ onClose, onConnected }) {
                   value={form[c.key]}
                   onChange={set(c.key)}
                   placeholder={c.placeholder}
-                  className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+                  className="h-11 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-base outline-none focus:border-[#0F8C5A] sm:h-auto sm:text-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
                 />
               </div>
             ))}
@@ -121,7 +121,7 @@ export default function ConectarManualModal({ onClose, onConnected }) {
                   ) : (
                     <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
                   )}
-                  <div>
+                  <div className="min-w-0 break-words">
                     <span className={et.ok ? "text-zinc-700 dark:text-zinc-200" : "font-medium text-red-700 dark:text-red-300"}>
                       {PASSO_LABEL[et.passo] ?? et.passo}
                     </span>
@@ -133,18 +133,18 @@ export default function ConectarManualModal({ onClose, onConnected }) {
           )}
 
           {erro && (
-            <div className="rounded-lg bg-red-50 px-3 py-2 text-[12px] text-red-700 dark:bg-red-500/10 dark:text-red-300">{erro}</div>
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-[12px] break-words text-red-700 dark:bg-red-500/10 dark:text-red-300">{erro}</div>
           )}
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-zinc-100 px-6 py-4 dark:border-zinc-800">
-          <button onClick={onClose} className="rounded-xl border border-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">
+        <div className="flex shrink-0 justify-end gap-2 border-t border-zinc-100 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-4 dark:border-zinc-800">
+          <button onClick={onClose} className="flex-1 rounded-xl border border-zinc-200 px-3.5 py-2.5 text-sm font-medium text-zinc-600 sm:flex-none sm:py-2 dark:border-zinc-800 dark:text-zinc-300">
             Cancelar
           </button>
           <button
             onClick={submit}
             disabled={!preenchido || pending}
-            className="rounded-xl px-3.5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex-1 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none sm:py-2"
             style={{ backgroundColor: "#0F8C5A" }}
           >
             {pending ? "Conectando…" : "Conectar"}

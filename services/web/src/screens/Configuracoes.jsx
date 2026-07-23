@@ -85,7 +85,7 @@ function AbaBilling() {
         </div>
         <button
           onClick={billingRes.reload}
-          className="rounded-xl border border-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          className="rounded-xl border border-zinc-200 px-3.5 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:py-2"
         >
           Tentar novamente
         </button>
@@ -100,14 +100,23 @@ function AbaBilling() {
   const st = STATUS_ASSINATURA[status] ?? STATUS_ASSINATURA.inactive;
   const precoCents = sub?.priceCents ?? 13500;
 
+  // Derivações compartilhadas pelas duas visões do extrato (cards no mobile / tabela no desktop)
+  const linhasPagamento = pagamentos.map((p) => ({
+    p,
+    pst: PAGAMENTO_STATUS[p.status] ?? PAGAMENTO_STATUS.pending,
+    quando: p.paidAt ?? p.dueAt ?? p.createdAt,
+    extraCredito:
+      p.kind === "credit_topup" && p.creditedCents != null ? formatBRL(p.creditedCents) : null,
+  }));
+
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       {/* Assinatura */}
-      <Card className="p-6 lg:col-span-2">
+      <Card className="p-4 sm:p-6 lg:col-span-2">
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <div className="text-[11px] uppercase tracking-wide text-zinc-400">Assinatura Zaplane</div>
-            <div className="mt-1 text-xl font-semibold text-zinc-900 dark:text-white">{formatBRL(precoCents)}/mês</div>
+            <div className="mt-1 break-words text-xl font-semibold tabular-nums text-zinc-900 dark:text-white">{formatBRL(precoCents)}/mês</div>
             <div className="text-[13px] text-zinc-500 dark:text-zinc-400">
               Libera criação de campanhas e envio de mensagens (template/avulso).
             </div>
@@ -118,9 +127,9 @@ function AbaBilling() {
         </div>
 
         {status === "active" && sub?.currentPeriodEnd && (
-          <div className="mt-5 inline-block rounded-xl bg-zinc-50 p-4 dark:bg-zinc-800/40">
+          <div className="mt-5 block rounded-xl bg-zinc-50 p-4 dark:bg-zinc-800/40 sm:inline-block">
             <div className="text-[11px] text-zinc-400">Próximo vencimento</div>
-            <div className="mt-0.5 text-lg font-semibold text-zinc-900 dark:text-white">
+            <div className="mt-0.5 text-lg font-semibold tabular-nums text-zinc-900 dark:text-white">
               {new Date(sub.currentPeriodEnd).toLocaleDateString("pt-BR")}
             </div>
           </div>
@@ -139,7 +148,7 @@ function AbaBilling() {
 
         {status !== "active" && (
           <div className="mt-5">
-            <PrimaryBtn onClick={() => setNotaAtivar(true)}>
+            <PrimaryBtn className="w-full sm:w-auto" onClick={() => setNotaAtivar(true)}>
               <CreditCard className="h-4 w-4" /> Ativar assinatura
             </PrimaryBtn>
             {notaAtivar && (
@@ -154,20 +163,20 @@ function AbaBilling() {
       </Card>
 
       {/* Créditos (carteira) */}
-      <Card className="p-6">
+      <Card className="p-4 sm:p-6">
         <h2 className="inline-flex items-center gap-1.5 text-sm font-semibold text-zinc-900 dark:text-white">
-          <Wallet className="h-4 w-4" /> Créditos (carteira)
+          <Wallet className="h-4 w-4 shrink-0" /> Créditos (carteira)
         </h2>
         <div className="mt-3 rounded-xl bg-zinc-50 p-4 dark:bg-zinc-800/40">
           <div className="text-[11px] text-zinc-400">Saldo disponível</div>
-          <div className="mt-0.5 text-2xl font-semibold text-zinc-900 dark:text-white">
+          <div className="mt-0.5 break-words text-2xl font-semibold tabular-nums text-zinc-900 dark:text-white">
             {formatBRL(wallet.balanceCents)}
           </div>
         </div>
 
         <button
           onClick={() => { setSeletorAberto((v) => !v); setMensagemCompra(null); }}
-          className="mt-3 w-full rounded-xl border border-zinc-200 py-2 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          className="mt-3 w-full rounded-xl border border-zinc-200 py-2.5 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:py-2"
         >
           Comprar créditos
         </button>
@@ -179,7 +188,7 @@ function AbaBilling() {
                 key={v}
                 disabled={comprar.pending}
                 onClick={() => onComprar(v)}
-                className="rounded-lg border border-zinc-200 py-2 text-[13px] font-medium text-zinc-700 transition-colors hover:border-[#0F8C5A] hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-emerald-500/10"
+                className="rounded-lg border border-zinc-200 px-1 py-2.5 text-[12px] font-medium tabular-nums text-zinc-700 transition-colors hover:border-[#0F8C5A] hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-emerald-500/10 sm:py-2 sm:text-[13px]"
               >
                 {formatBRL(v)}
               </button>
@@ -201,40 +210,69 @@ function AbaBilling() {
 
       {/* Extrato/pagamentos */}
       <Card className="overflow-hidden lg:col-span-3">
-        <div className="flex items-center gap-1.5 px-5 py-4">
-          <Receipt className="h-4 w-4 text-zinc-400" />
+        <div className="flex items-center gap-1.5 px-4 py-4 sm:px-5">
+          <Receipt className="h-4 w-4 shrink-0 text-zinc-400" />
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Extrato de pagamentos</h2>
         </div>
-        {pagamentos.length === 0 ? (
-          <div className="px-5 pb-9 pt-1 text-center text-[13px] text-zinc-400">
+        {linhasPagamento.length === 0 ? (
+          <div className="px-4 pb-9 pt-1 text-center text-[13px] text-zinc-400 sm:px-5">
             Nenhuma movimentação ainda.
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-y border-zinc-100 bg-zinc-50/60 text-left text-[11px] uppercase tracking-wide text-zinc-400 dark:border-zinc-800 dark:bg-zinc-800/40">
-                  <th className="px-5 py-2.5 font-medium">Tipo</th>
-                  <th className="px-3 py-2.5 font-medium">Valor</th>
-                  <th className="px-3 py-2.5 font-medium">Status</th>
-                  <th className="px-3 py-2.5 font-medium">Método</th>
-                  <th className="px-5 py-2.5 font-medium">Data</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pagamentos.map((p) => {
-                  const pst = PAGAMENTO_STATUS[p.status] ?? PAGAMENTO_STATUS.pending;
-                  const quando = p.paidAt ?? p.dueAt ?? p.createdAt;
-                  return (
+          <>
+            {/* Mobile: lista de cards */}
+            <ul className="border-t border-zinc-100 lg:hidden dark:border-zinc-800">
+              {linhasPagamento.map(({ p, pst, quando, extraCredito }) => (
+                <li key={p.id} className="border-b border-zinc-100 px-4 py-3 last:border-0 dark:border-zinc-800/60">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-zinc-800 dark:text-zinc-100">
+                        {PAGAMENTO_KIND[p.kind] ?? p.kind}
+                      </div>
+                      <div className="mt-0.5 break-words text-[13px] tabular-nums text-zinc-600 dark:text-zinc-300">
+                        {formatBRL(p.amountCents)}
+                        {extraCredito && (
+                          <span className="ml-1 text-[11px] text-zinc-400">(creditou {extraCredito})</span>
+                        )}
+                      </div>
+                    </div>
+                    <span className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${pst.cls}`}>
+                      {pst.label}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-zinc-400">
+                    <span className="truncate">{p.method ?? "—"}</span>
+                    <span className="tabular-nums">
+                      {quando ? new Date(quando).toLocaleDateString("pt-BR") : "—"}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+
+            {/* Desktop: tabela */}
+            <div className="hidden overflow-x-auto lg:block">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-y border-zinc-100 bg-zinc-50/60 text-left text-[11px] uppercase tracking-wide text-zinc-400 dark:border-zinc-800 dark:bg-zinc-800/40">
+                    <th className="px-5 py-2.5 font-medium">Tipo</th>
+                    <th className="px-3 py-2.5 font-medium">Valor</th>
+                    <th className="px-3 py-2.5 font-medium">Status</th>
+                    <th className="px-3 py-2.5 font-medium">Método</th>
+                    <th className="px-5 py-2.5 font-medium">Data</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {linhasPagamento.map(({ p, pst, quando, extraCredito }) => (
                     <tr key={p.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60">
                       <td className="px-5 py-3 font-medium text-zinc-800 dark:text-zinc-100">
                         {PAGAMENTO_KIND[p.kind] ?? p.kind}
                       </td>
                       <td className="px-3 py-3 tabular-nums text-zinc-600 dark:text-zinc-300">
                         {formatBRL(p.amountCents)}
-                        {p.kind === "credit_topup" && p.creditedCents != null && (
+                        {extraCredito && (
                           <span className="ml-1 text-[11px] text-zinc-400">
-                            (creditou {formatBRL(p.creditedCents)})
+                            (creditou {extraCredito})
                           </span>
                         )}
                       </td>
@@ -248,11 +286,11 @@ function AbaBilling() {
                         {quando ? new Date(quando).toLocaleDateString("pt-BR") : "—"}
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </Card>
     </div>
@@ -280,6 +318,33 @@ const RBAC_CLS = {
   Operador: "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300",
   Leitor:   "bg-zinc-100 text-zinc-600 ring-zinc-500/20 dark:bg-zinc-700/40 dark:text-zinc-300",
 };
+
+/* Pedaços reusados pela lista de equipe (cards no mobile + tabela no desktop) */
+const iniciais = (nome) => nome.split(" ").map((n) => n[0]).slice(0, 2).join("");
+
+function AvatarMembro({ nome }) {
+  return (
+    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300">
+      {iniciais(nome)}
+    </div>
+  );
+}
+
+function PapelBadge({ papel }) {
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${RBAC_CLS[papel]}`}>
+      {papel}
+    </span>
+  );
+}
+
+function BotaoAcoesMembro() {
+  return (
+    <button className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 lg:h-auto lg:w-auto lg:p-1.5 dark:hover:bg-zinc-800">
+      <MoreVertical className="h-4 w-4" />
+    </button>
+  );
+}
 
 /* ----------------------------- Configurações ----------------------------- */
 export default function Configuracoes() {
@@ -315,7 +380,7 @@ export default function Configuracoes() {
       <ConectarWhatsAppButton onConnected={canaisRes.reload} primary />
       <button
         onClick={() => setModalManualAberto(true)}
-        className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-3.5 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:py-2"
       >
         <Plus className="h-4 w-4" /> Conectar manualmente
       </button>
@@ -323,7 +388,7 @@ export default function Configuracoes() {
   );
 
   return (
-    <div className="space-y-5 p-7">
+    <div className="space-y-4 p-4 sm:space-y-5 sm:p-6 lg:p-7">
       {/* Banner de aviso — dados de exemplo (Equipe segue mock; Conexão e Billing já são live) */}
       {tab === "equipe" && (
         <div className="rounded-xl bg-amber-50 px-4 py-2 text-[13px] text-amber-800 ring-1 ring-inset ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-300">
@@ -331,32 +396,31 @@ export default function Configuracoes() {
         </div>
       )}
 
-      <div
-        className="flex items-center gap-1 rounded-xl border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-900"
-        style={{ width: "fit-content" }}
-      >
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <div className="flex w-max min-w-full items-center gap-1 rounded-xl border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-900 sm:w-fit sm:min-w-0">
         {tabs.map((t) => {
           const I = t.icon;
           return (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
+              className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2.5 text-[13px] font-medium transition-colors sm:px-3.5 sm:py-1.5 ${
                 tab === t.id
                   ? "bg-emerald-50 text-[#0F8C5A] dark:bg-emerald-500/10 dark:text-emerald-300"
                   : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100"
               }`}
             >
-              <I className="h-4 w-4" /> {t.label}
+              <I className="h-4 w-4 shrink-0" /> {t.label}
             </button>
           );
         })}
+        </div>
       </div>
 
       {tab === "meta" && (
         <div className="space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
+            <div className="min-w-0">
               <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Números conectados</h2>
               <p className="text-[13px] text-zinc-500 dark:text-zinc-400">
                 Conecte pelo menos um número do WhatsApp Business para disparar campanhas.
@@ -384,7 +448,7 @@ export default function Configuracoes() {
               </div>
               <button
                 onClick={canaisRes.reload}
-                className="rounded-xl border border-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                className="rounded-xl border border-zinc-200 px-3.5 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:py-2"
               >
                 Tentar novamente
               </button>
@@ -393,7 +457,7 @@ export default function Configuracoes() {
 
           {!canaisRes.loading && !canaisRes.error && (
             canais.length === 0 ? (
-              <Card className="flex flex-col items-center gap-4 p-10 text-center">
+              <Card className="flex flex-col items-center gap-4 p-6 text-center sm:p-10">
                 <p className="text-[13px] text-zinc-500 dark:text-zinc-400">
                   Nenhum número conectado ainda. Conecte pelo popup oficial da Meta ou cole as
                   credenciais manualmente.
@@ -407,15 +471,15 @@ export default function Configuracoes() {
                   const st = STATUS_CANAL[c.status] ?? STATUS_CANAL.disabled;
                   const qual = c.qualityRating ? (QUALIDADE_META[c.qualityRating] ?? QUALIDADE_META.UNKNOWN) : null;
                   return (
-                    <Card key={c.id} className="flex flex-col gap-3 p-5">
+                    <Card key={c.id} className="flex flex-col gap-3 p-4 sm:p-5">
                       <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="text-[13px] font-semibold tabular-nums text-zinc-900 dark:text-white">
+                        <div className="min-w-0">
+                          <div className="break-all text-[13px] font-semibold tabular-nums text-zinc-900 dark:text-white">
                             {c.displayNumber || c.phoneNumberId}
                           </div>
-                          <div className="text-[12px] text-zinc-400">{c.label}</div>
+                          <div className="truncate text-[12px] text-zinc-400">{c.label}</div>
                         </div>
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${st.cls}`}>
+                        <span className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${st.cls}`}>
                           {st.label}
                         </span>
                       </div>
@@ -432,26 +496,26 @@ export default function Configuracoes() {
                       </div>
 
                       <div className="grid grid-cols-2 gap-2 text-[11px] text-zinc-400">
-                        <div>
+                        <div className="min-w-0">
                           Phone Number ID
-                          <div className="tabular-nums text-zinc-600 dark:text-zinc-300">{c.phoneNumberId}</div>
+                          <div className="break-all tabular-nums text-zinc-600 dark:text-zinc-300">{c.phoneNumberId}</div>
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           WABA ID
-                          <div className="tabular-nums text-zinc-600 dark:text-zinc-300">{c.wabaId}</div>
+                          <div className="break-all tabular-nums text-zinc-600 dark:text-zinc-300">{c.wabaId}</div>
                         </div>
                       </div>
 
-                      <div className="mt-1 flex items-center justify-between border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                      <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-zinc-100 pt-3 dark:border-zinc-800">
                         <span className="text-[11px] text-zinc-400">
                           {c.createdAt ? `Conectado em ${new Date(c.createdAt).toLocaleDateString("pt-BR")}` : ""}
                         </span>
                         <button
                           onClick={() => onDesconectar(c.id)}
                           disabled={c.status === "disabled" || desconectar.pending}
-                          className="inline-flex items-center gap-1.5 text-[12px] font-medium text-red-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline dark:text-red-400"
+                          className="-my-1.5 inline-flex shrink-0 items-center gap-1.5 py-1.5 text-[12px] font-medium text-red-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline dark:text-red-400 sm:my-0 sm:py-0"
                         >
-                          <Trash2 className="h-3.5 w-3.5" /> Desconectar
+                          <Trash2 className="h-3.5 w-3.5 shrink-0" /> Desconectar
                         </button>
                       </div>
                     </Card>
@@ -472,11 +536,31 @@ export default function Configuracoes() {
 
       {tab === "equipe" && (
         <Card className="overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4">
+          <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Membros da equipe</h2>
-            <PrimaryBtn><Plus className="h-4 w-4" /> Convidar membro</PrimaryBtn>
+            <PrimaryBtn className="w-full sm:w-auto"><Plus className="h-4 w-4" /> Convidar membro</PrimaryBtn>
           </div>
-          <table className="w-full text-sm">
+
+          {/* Mobile: lista de cards */}
+          <ul className="border-t border-zinc-100 lg:hidden dark:border-zinc-800">
+            {MEMBROS.map((m) => (
+              <li key={m.id} className="flex items-start gap-3 border-b border-zinc-100 px-4 py-3.5 last:border-0 dark:border-zinc-800/60">
+                <AvatarMembro nome={m.nome} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="truncate text-sm font-medium text-zinc-800 dark:text-zinc-100">{m.nome}</span>
+                    <PapelBadge papel={m.papel} />
+                  </div>
+                  <div className="truncate text-[12px] text-zinc-400">{m.email}</div>
+                  <div className="mt-1 text-[12px] leading-snug text-zinc-500 dark:text-zinc-400">{RBAC_DESC[m.papel]}</div>
+                </div>
+                <BotaoAcoesMembro />
+              </li>
+            ))}
+          </ul>
+
+          {/* Desktop: tabela */}
+          <table className="hidden w-full text-sm lg:table">
             <thead>
               <tr className="border-y border-zinc-100 bg-zinc-50/60 text-left text-[11px] uppercase tracking-wide text-zinc-400 dark:border-zinc-800 dark:bg-zinc-800/40">
                 <th className="px-5 py-2.5 font-medium">Membro</th>
@@ -490,9 +574,7 @@ export default function Configuracoes() {
                 <tr key={m.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60">
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300">
-                        {m.nome.split(" ").map((n) => n[0]).slice(0, 2).join("")}
-                      </div>
+                      <AvatarMembro nome={m.nome} />
                       <div>
                         <div className="font-medium text-zinc-800 dark:text-zinc-100">{m.nome}</div>
                         <div className="text-[12px] text-zinc-400">{m.email}</div>
@@ -500,15 +582,11 @@ export default function Configuracoes() {
                     </div>
                   </td>
                   <td className="px-3 py-3">
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${RBAC_CLS[m.papel]}`}>
-                      {m.papel}
-                    </span>
+                    <PapelBadge papel={m.papel} />
                   </td>
                   <td className="px-3 py-3 text-[12px] text-zinc-500 dark:text-zinc-400">{RBAC_DESC[m.papel]}</td>
                   <td className="px-5 py-3 text-right">
-                    <button className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                      <MoreVertical className="h-4 w-4" />
-                    </button>
+                    <BotaoAcoesMembro />
                   </td>
                 </tr>
               ))}
