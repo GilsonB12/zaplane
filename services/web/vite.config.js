@@ -19,5 +19,14 @@ export default defineConfig(({ mode }) => {
         "/api": { target, changeOrigin: true },
       },
     },
+    // Produção (vite preview atrás do Railway): libera os domínios públicos do
+    // painel — sem isso o Vite bloqueia requests com Host desconhecido.
+    preview: {
+      allowedHosts: [
+        "zaplane.com.br",
+        "www.zaplane.com.br",
+        ...(allowedHost ? [allowedHost] : []),
+      ],
+    },
   };
 });
