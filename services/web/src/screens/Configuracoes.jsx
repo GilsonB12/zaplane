@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Plus, MoreVertical, Trash2,
   Phone, CreditCard, UserCog,
@@ -52,12 +52,30 @@ function AbaBilling() {
   const [seletorAberto, setSeletorAberto] = useState(false);
   const [mensagemCompra, setMensagemCompra] = useState(null);
   const [notaAtivar, setNotaAtivar] = useState(false);
+  const [cpfInput, setCpfInput] = useState("");
+
+  // pré-preenche o CPF/CNPJ já salvo na organização (billing.summary.cpfCnpj)
+  useEffect(() => {
+    if (billingRes.data?.cpfCnpj) setCpfInput(billingRes.data.cpfCnpj);
+  }, [billingRes.data?.cpfCnpj]);
 
   async function onComprar(valorCents) {
     setMensagemCompra(null);
     try {
-      await comprar.run(valorCents);
-      setMensagemCompra({ tipo: "sucesso", texto: "Créditos adicionados com sucesso." });
+      const res = await comprar.run(valorCents, cpfInput.trim() || undefined);
+      // buyCredits só CRIA a cobrança (Pix/boleto/cartão) no Asaas; a carteira
+      // só é creditada quando o pagamento é confirmado (webhook). Antes o painel
+      // dizia "Créditos adicionados com sucesso" na hora — o que era falso (o
+      // saldo não mudava e não havia link para pagar). Agora abrimos o link de
+      // pagamento e deixamos claro que o crédito entra após a confirmação.
+      if (res?.paymentUrl) window.open(res.paymentUrl, "_blank", "noopener,noreferrer");
+      setMensagemCompra({
+        tipo: "sucesso",
+        texto: res?.paymentUrl
+          ? "Cobrança gerada. Abra o link para pagar — o crédito entra na carteira após a confirmação do pagamento."
+          : "Cobrança criada. Acompanhe o pagamento no extrato abaixo.",
+        paymentUrl: res?.paymentUrl ?? null,
+      });
       billingRes.reload();
     } catch (e) {
       setMensagemCompra({
@@ -174,6 +192,22 @@ function AbaBilling() {
           </div>
         </div>
 
+        <div className="mt-3">
+          <label className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+            CPF/CNPJ do responsável pela cobrança
+          </label>
+          <input
+            value={cpfInput}
+            onChange={(e) => setCpfInput(e.target.value)}
+            inputMode="numeric"
+            placeholder="Somente números"
+            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-base outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 sm:py-2 sm:text-sm"
+          />
+          <p className="mt-1 text-[11px] leading-snug text-zinc-400">
+            Obrigatório para emitir a cobrança (Asaas). Usado só na emissão.
+          </p>
+        </div>
+
         <button
           onClick={() => { setSeletorAberto((v) => !v); setMensagemCompra(null); }}
           className="mt-3 w-full rounded-xl border border-zinc-200 py-2.5 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:py-2"
@@ -197,9 +231,22 @@ function AbaBilling() {
         )}
 
         {mensagemCompra && (
-          <p className={`mt-3 inline-flex items-start gap-1.5 text-[12px] ${mensagemCompra.tipo === "sucesso" ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}`}>
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {mensagemCompra.texto}
-          </p>
+          <div className={`mt-3 text-[12px] ${mensagemCompra.tipo === "sucesso" ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}`}>
+            <p className="inline-flex items-start gap-1.5">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {mensagemCompra.texto}
+            </p>
+            {mensagemCompra.paymentUrl && (
+              <a
+                href={mensagemCompra.paymentUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-white hover:opacity-90"
+                style={{ backgroundColor: "#0F8C5A" }}
+              >
+                <CreditCard className="h-3.5 w-3.5" /> Abrir cobrança para pagar
+              </a>
+            )}
+          </div>
         )}
 
         <p className="mt-3 inline-flex items-start gap-1.5 text-[11px] text-zinc-400">

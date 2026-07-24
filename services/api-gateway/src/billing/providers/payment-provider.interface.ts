@@ -13,10 +13,10 @@ export interface OrgCustomerInput {
   id: string;
   name: string;
   email?: string | null;
-  /** CPF/CNPJ do responsável pela cobrança. Ainda não coletamos isso no
-   *  cadastro da organização — o adaptador usa um placeholder válido em
-   *  sandbox quando ausente (ver asaas.provider.ts). Coleta real de
-   *  CPF/CNPJ é produto futuro. */
+  /** CPF/CNPJ do responsável pela cobrança (só dígitos, já validado pelo
+   *  billing.service). Obrigatório em produção — o Asaas rejeita documento
+   *  inválido; o adaptador só cai num placeholder em sandbox quando ausente
+   *  (ver asaas.provider.ts). */
   cpfCnpj?: string | null;
 }
 

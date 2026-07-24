@@ -69,7 +69,12 @@ export const disconnectChannel = (id) => api.del(`/channels/${id}`);
 export const getBillingSummary = () => api.get("/billing/summary");
 export const getWallet = () => api.get("/billing/wallet");
 export const getSubscription = () => api.get("/billing/subscription");
-export const buyCredits = (amountCents) => api.post("/billing/credits", { amountCents });
+// cpfCnpj: opcional. Enviado quando o responsável pela cobrança ainda não tem
+// documento salvo (obrigatório em produção — o Asaas exige CPF/CNPJ válido).
+export const buyCredits = (amountCents, cpfCnpj) =>
+  api.post("/billing/credits", { amountCents, ...(cpfCnpj ? { cpfCnpj } : {}) });
+export const activateSubscription = (cpfCnpj) =>
+  api.post("/billing/subscription/activate", cpfCnpj ? { cpfCnpj } : {});
 
 /* ---- Sessão ---- */
 export function logout() { setToken(null); }

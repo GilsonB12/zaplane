@@ -18,6 +18,7 @@ model Organization {
   plan              String   @default("free")
   dailyMessageLimit Int      @default(1000) @map("daily_message_limit")
   status            String   @default("active")
+  cpfCnpj           String?  @map("cpf_cnpj")
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 

@@ -1,4 +1,11 @@
-import { HttpException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -8,6 +15,7 @@ import {
   PaymentProviderAdapter,
 } from './providers/payment-provider.interface';
 import { BuyCreditsDto } from './dto/buy-credits.dto';
+import { isValidTaxId, normalizeTaxId } from '../common/util/tax-id';
 
 // Prisma $transaction: as transações de ativação de assinatura/compra de
 // créditos fazem chamadas HTTP síncronas ao Asaas DENTRO da transação (de
@@ -30,7 +38,7 @@ export class BillingService {
   /** Resumo p/ o painel: assinatura + saldo da carteira + últimos pagamentos
    *  (com paymentUrl, para o painel linkar cobranças pendentes/vencidas). */
   async getSummary(orgId: string) {
-    const [subscription, wallet, recentPayments] = await Promise.all([
+    const [subscription, wallet, recentPayments, org] = await Promise.all([
       this.prisma.subscription.findUnique({ where: { organizationId: orgId } }),
       this.prisma.wallet.findUnique({ where: { organizationId: orgId } }),
       this.prisma.payment.findMany({
@@ -38,6 +46,7 @@ export class BillingService {
         orderBy: { createdAt: 'desc' },
         take: 10,
       }),
+      this.prisma.organization.findUnique({ where: { id: orgId }, select: { cpfCnpj: true } }),
     ]);
 
     const mappedPayments = recentPayments.map((p) => ({
@@ -63,6 +72,9 @@ export class BillingService {
           }
         : null,
       wallet: { balanceCents: wallet?.balanceCents ?? 0 },
+      // CPF/CNPJ do responsável já salvo (para o painel pré-preencher o campo e
+      // saber se ainda precisa pedir). Null quando nunca informado.
+      cpfCnpj: org?.cpfCnpj ?? null,
       recentPayments: mappedPayments,
       // conveniência p/ o painel: cobranças que ainda precisam de ação do
       // usuário (pagar), já com o link de pagamento em destaque.
@@ -140,6 +152,45 @@ export class BillingService {
   // B3 — Asaas: ativação de assinatura e compra de créditos
   // -----------------------------------------------------------------------
 
+  /** Resolve o CPF/CNPJ do responsável pela cobrança que será usado ao criar
+   *  o customer no provedor. Usa o `provided` (se informado, valida os dígitos
+   *  verificadores e persiste na organização) ou o já salvo (`current`). Em
+   *  PRODUÇÃO exige um valor válido — o Asaas rejeita documento inválido, e o
+   *  provider só cai num placeholder em sandbox. Retorna o documento (só
+   *  dígitos) a usar, ou null (só possível fora de produção). */
+  private async resolveTaxId(
+    orgId: string,
+    current: string | null,
+    provided?: string | null,
+  ): Promise<string | null> {
+    let cpf = current ?? null;
+
+    if (provided != null && String(provided).trim() !== '') {
+      const norm = normalizeTaxId(provided);
+      if (!norm || !isValidTaxId(norm)) {
+        throw new BadRequestException({
+          code: 'INVALID_TAX_ID',
+          message: 'CPF/CNPJ inválido. Confira os dígitos.',
+        });
+      }
+      cpf = norm;
+    }
+
+    const isProd = this.config.get<string>('env') === 'production';
+    if (isProd && !cpf) {
+      throw new BadRequestException({
+        code: 'TAX_ID_REQUIRED',
+        message: 'Informe um CPF/CNPJ válido do responsável pela cobrança antes de continuar.',
+      });
+    }
+
+    // persiste só quando mudou (evita UPDATE à toa a cada compra)
+    if (cpf && cpf !== current) {
+      await this.prisma.organization.update({ where: { id: orgId }, data: { cpfCnpj: cpf } });
+    }
+    return cpf;
+  }
+
   /** Garante customer + subscription no Asaas p/ a organização e retorna o
    *  link de pagamento da 1ª cobrança. A assinatura permanece 'inactive' no
    *  nosso banco até o webhook confirmar o 1º pagamento — só o provedor sabe
@@ -156,9 +207,17 @@ export class BillingService {
    *  requisição só prossegue depois que a primeira commita — e nesse ponto já
    *  vê os IDs preenchidos, então não cria de novo.
    */
-  async activateSubscription(orgId: string, actorEmail: string | null): Promise<{ paymentUrl: string | null }> {
+  async activateSubscription(
+    orgId: string,
+    actorEmail: string | null,
+    providedCpf?: string | null,
+  ): Promise<{ paymentUrl: string | null }> {
     const org = await this.prisma.organization.findUnique({ where: { id: orgId } });
     if (!org) throw new NotFoundException('Organização não encontrada.');
+
+    // valida/persiste/exige (em produção) o CPF/CNPJ do responsável antes de
+    // criar o customer no Asaas.
+    const cpfCnpj = await this.resolveTaxId(orgId, org.cpfCnpj, providedCpf);
 
     // garante a linha fora da trava — caso defensivo (normalmente já existe
     // desde o cadastro, criada em auth.service.ts); não há corrida real aqui
@@ -193,7 +252,7 @@ export class BillingService {
           id: orgId,
           name: org.name,
           email: actorEmail,
-          cpfCnpj: null,
+          cpfCnpj,
         });
         providerCustomerId = created.providerCustomerId;
         await tx.subscription.update({
@@ -254,6 +313,9 @@ export class BillingService {
     const org = await this.prisma.organization.findUnique({ where: { id: orgId } });
     if (!org) throw new NotFoundException('Organização não encontrada.');
 
+    // valida/persiste/exige (em produção) o CPF/CNPJ antes de criar o customer.
+    const cpfCnpj = await this.resolveTaxId(orgId, org.cpfCnpj, dto.cpfCnpj);
+
     const providerCustomerId = await this.prisma.$transaction(async (tx) => {
       const rows = await tx.$queryRawUnsafe<Array<{ id: string; provider_customer_id: string | null }>>(
         'SELECT id, provider_customer_id FROM subscriptions WHERE organization_id = $1::uuid FOR UPDATE',
@@ -271,7 +333,7 @@ export class BillingService {
 
       if (locked.provider_customer_id) return locked.provider_customer_id;
 
-      const created = await this.provider.createCustomer({ id: orgId, name: org.name, email: null, cpfCnpj: null });
+      const created = await this.provider.createCustomer({ id: orgId, name: org.name, email: null, cpfCnpj });
       await tx.subscription.update({ where: { id: locked.id }, data: { providerCustomerId: created.providerCustomerId } });
       return created.providerCustomerId;
     }, PROVIDER_CALL_TX_OPTS);

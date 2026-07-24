@@ -1,4 +1,4 @@
-import { HttpException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, HttpException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'crypto';
 import axios, { AxiosInstance } from 'axios';
@@ -106,9 +106,20 @@ export class AsaasProvider implements PaymentProviderAdapter {
   }
 
   async createCustomer(org: OrgCustomerInput): Promise<CreateCustomerResult> {
+    // Em produção o Asaas exige CPF/CNPJ válido do pagador; NÃO usamos o
+    // placeholder de sandbox aqui (o billing.service já valida/exige antes —
+    // esta é a defesa em profundidade). Em dev/homologação, cai no placeholder.
+    const isProd = this.config.get<string>('env') === 'production';
+    const cpfCnpj = org.cpfCnpj || (isProd ? null : SANDBOX_PLACEHOLDER_CPF);
+    if (!cpfCnpj) {
+      throw new BadRequestException({
+        code: 'TAX_ID_REQUIRED',
+        message: 'CPF/CNPJ do responsável é obrigatório em produção para criar o cliente no provedor.',
+      });
+    }
     const payload = {
       name: org.name,
-      cpfCnpj: org.cpfCnpj || SANDBOX_PLACEHOLDER_CPF,
+      cpfCnpj,
       email: org.email || undefined,
       externalReference: org.id,
     };

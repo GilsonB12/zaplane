@@ -5,6 +5,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { BillingService } from './billing.service';
 import { BuyCreditsDto } from './dto/buy-credits.dto';
+import { ActivateSubscriptionDto } from './dto/activate-subscription.dto';
 
 // Sem SubscriptionGuard aqui de propósito: ver saldo/assinatura/extrato tem
 // que funcionar mesmo com a assinatura inativa/vencida (é como o cliente
@@ -36,8 +37,9 @@ export class BillingController {
   activateSubscription(
     @CurrentUser('organizationId') orgId: string,
     @CurrentUser('email') email: string,
+    @Body() dto: ActivateSubscriptionDto,
   ) {
-    return this.billing.activateSubscription(orgId, email ?? null);
+    return this.billing.activateSubscription(orgId, email ?? null, dto?.cpfCnpj ?? null);
   }
 
   @Post('credits')
