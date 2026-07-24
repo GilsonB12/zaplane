@@ -6,9 +6,10 @@ dist/
 .env.local
 # Prisma
 services/api-gateway/prisma/*.db
-# Go
-services/dispatcher/bin/
-services/dispatcher/dispatcher
+# Go — compile o binário local em bin/ (ex.: go build -o bin/dispatcher).
+# NÃO ignorar o caminho "services/dispatcher/dispatcher": o uploader do Railway
+# CLI casa o último componente como basename e excluiria cmd/dispatcher do deploy.
+/services/dispatcher/bin/
 # Python
 __pycache__/
 *.pyc
