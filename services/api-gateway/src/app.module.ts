@@ -16,6 +16,8 @@ import { PrivacyModule } from './privacy/privacy.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { ChannelsModule } from './channels/channels.module';
 import { BillingModule } from './billing/billing.module';
+import { MembersModule } from './members/members.module';
+import { MetricsModule } from './metrics/metrics.module';
 
 @Module({
   imports: [
@@ -34,6 +36,8 @@ import { BillingModule } from './billing/billing.module';
     ConversationsModule,
     ChannelsModule,
     BillingModule,
+    MembersModule,
+    MetricsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

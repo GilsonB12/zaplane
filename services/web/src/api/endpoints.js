@@ -12,6 +12,15 @@ export async function register(dto) {
   setToken(r.accessToken);
   return r;
 }
+// Perfil do usuário logado — usado para exibir quem está na sessão (e para
+// reidratar a identidade após um F5, quando só o token sobrevive).
+export const getMe = () => api.get("/auth/me");
+
+/* ---- Equipe ---- */
+export const listMembers = () => api.get("/members");
+
+/* ---- Métricas ---- */
+export const getDashboardMetrics = () => api.get("/metrics/dashboard");
 
 /* ---- Contatos ---- */
 export const listContacts = (query = {}) => {

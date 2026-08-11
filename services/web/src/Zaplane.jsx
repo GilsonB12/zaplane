@@ -25,7 +25,7 @@ const TITLES = {
 };
 
 function AppShell() {
-  const { logout } = useAuth();
+  const { logout, user, carregandoUser } = useAuth();
   const [screen, setScreen] = useState("dashboard");
   const [dark, setDark] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -55,7 +55,11 @@ function AppShell() {
       <div className="flex h-screen overflow-hidden bg-zinc-50 font-sans text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
         <Sidebar screen={screen} setScreen={setScreen} open={navOpen} onClose={() => setNavOpen(false)} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <Topbar title={title} subtitle={subtitle} dark={dark} setDark={setDark} actions={topActions} onLogout={logout} onMenu={() => setNavOpen(true)} />
+          <Topbar
+            title={title} subtitle={subtitle} dark={dark} setDark={setDark}
+            actions={topActions} onLogout={logout} onMenu={() => setNavOpen(true)}
+            user={user} carregandoUser={carregandoUser}
+          />
           <main className="flex-1 overflow-y-auto">
             {screen === "dashboard" && <Dashboard setScreen={setScreen} openCampaign={openCampaign} />}
             {screen === "contatos" && <Contatos openImport={() => setImportOpen(true)} reloadKey={contactsReload} />}

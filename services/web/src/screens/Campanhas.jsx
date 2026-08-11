@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import {
   MoreVertical, ChevronLeft, ChevronRight, Send, Zap, CheckCheck, FileText,
-  AlertTriangle, BadgeCheck, ShieldCheck, Check, UserRound, X, Wallet,
+  AlertTriangle, BadgeCheck, ShieldCheck, Check, UserRound, X, Wallet, Clock,
 } from "lucide-react";
 import {
   Card, StatusBadge, CategoryTag, ProgressBar, PrimaryBtn, BRAND, TEAL,
@@ -17,7 +17,12 @@ import { extrairVariaveis, contextoDaVariavel, preencherCorpo } from "../utils/t
 import { formatBRL } from "../utils/money.js";
 import { mensagem402 } from "../utils/billing.js";
 
-const TAXA_ZAPLANE_CENTS = 43; // R$ 0,43 por mensagem elegível entregue (ver docs/superpowers/specs/2026-07-16-cobranca-billing.md)
+// Taxa Zaplane por mensagem entregue, POR CATEGORIA (espelha
+// billing.usagePriceByCategory no gateway). Utility custa muito menos na Meta,
+// então cobrar o mesmo que marketing seria injusto.
+const TAXA_POR_CATEGORIA = { Utility: 10, Marketing: 43, Authentication: 43 };
+const TAXA_PADRAO_CENTS = 43;
+const taxaDaCategoria = (cat) => TAXA_POR_CATEGORIA[cat] ?? TAXA_PADRAO_CENTS;
 
 /* ----------------------------- Grid de campanhas ----------------------------- */
 export default function Campanhas({ openCampaign }) {
@@ -154,13 +159,14 @@ export function NovaCampanha({ setScreen, openCampaign }) {
     ? `Lista · ${listaAtual.name}`
     : "Todos os contatos da organização";
 
-  // estimativa da taxa Zaplane (elegíveis × R$ 0,43) — só temos contagem real
-  // quando o público é "todos os contatos"; para lista específica, a
-  // contagem exata só é conhecida após a criação da campanha
+  // estimativa da taxa Zaplane (elegíveis × preço da categoria do template) —
+  // só temos contagem real quando o público é "todos os contatos"; para lista
+  // específica, a contagem exata só é conhecida após a criação da campanha
   const totalContatosOrg = contatosRes.data?.total ?? null;
   const estimativaDestinatarios = listId === "" ? totalContatosOrg : null;
+  const taxaUnitariaCents = taxaDaCategoria(tpl?.categoria);
   const taxaZaplaneEstimadaCents = estimativaDestinatarios != null
-    ? estimativaDestinatarios * TAXA_ZAPLANE_CENTS
+    ? estimativaDestinatarios * taxaUnitariaCents
     : null;
   const saldoCents = billingRes.data?.wallet?.balanceCents ?? null;
   // aviso ANTES do disparo: se já sabemos a estimativa total, comparamos com
@@ -168,7 +174,7 @@ export function NovaCampanha({ setScreen, openCampaign }) {
   const saldoInsuficiente = saldoCents != null && (
     taxaZaplaneEstimadaCents != null
       ? saldoCents < taxaZaplaneEstimadaCents
-      : saldoCents < TAXA_ZAPLANE_CENTS
+      : saldoCents < taxaUnitariaCents
   );
 
   const steps = ["Público", "Template", "Revisão"];
@@ -594,36 +600,70 @@ export function CampanhaDetalhe({ campaignId, setScreen }) {
     { k: "Falhas", v: live?.falhas ?? 0, total: live?.total ?? 0, color: "#ef4444" },
   ];
 
+  // Timeline derivada dos dados reais da campanha. Cada etapa só aparece
+  // quando o dado que a sustenta existe — nada de horário ou etapa inventados.
+  const hora = (iso) => (iso ? new Date(iso).toLocaleString("pt-BR") : "—");
+  const n = (v) => (v ?? 0).toLocaleString("pt-BR");
+  const st = live?.statusRaw;
+  const pendentes = Math.max((live?.total ?? 0) - (live?.enviadas ?? 0) - (live?.falhas ?? 0), 0);
+
   const timeline = [
     {
-      t: live?.quando ?? "—",
-      label: "Campanha iniciada",
-      desc: `${(live?.total ?? 0).toLocaleString("pt-BR")} destinatários na fila`,
+      t: hora(live?.createdAt),
+      label: "Campanha criada",
+      desc: `${n(live?.total)} destinatário(s) após supressão por consentimento e opt-out`,
       icon: Send,
       done: true,
     },
+    // só existe se a campanha foi de fato agendada
+    ...(live?.scheduledAt
+      ? [{
+          t: hora(live.scheduledAt),
+          label: st === "scheduled" ? "Agendada" : "Disparo agendado",
+          desc: st === "scheduled" ? "Aguardando o horário programado" : "Horário programado do disparo",
+          icon: Clock,
+          done: st !== "scheduled",
+        }]
+      : []),
     {
-      t: "+0m12s",
-      label: "Aquecimento do número",
-      desc: "Envio escalonado para preservar a qualidade",
-      icon: Zap,
-      done: true,
+      t: (live?.enviadas ?? 0) > 0 ? `${n(live?.enviadas)} de ${n(live?.total)}` : "—",
+      label: (live?.enviadas ?? 0) > 0 ? "Envio em andamento" : "Aguardando envio",
+      desc: pendentes > 0
+        ? `${n(pendentes)} na fila · ${n(live?.falhas)} falha(s)`
+        : `Fila concluída · ${n(live?.falhas)} falha(s)`,
+      icon: Send,
+      done: (live?.enviadas ?? 0) > 0,
     },
     {
-      t: "agora",
-      label: live?.status === "enviando" ? "Enviando em tempo real" : "Envio concluído",
-      desc: `${(live?.entregues ?? 0).toLocaleString("pt-BR")} entregues · ${(live?.lidas ?? 0).toLocaleString("pt-BR")} lidas`,
+      t: (live?.entregues ?? 0) > 0 ? `${n(live?.entregues)} entregue(s)` : "—",
+      label: "Confirmação de entrega",
+      desc: `${n(live?.entregues)} entregues · ${n(live?.lidas)} lidas (confirmado pela Meta)`,
       icon: CheckCheck,
-      done: live?.status !== "enviando",
+      done: (live?.entregues ?? 0) > 0,
     },
-    {
-      t: "—",
-      label: "Relatório final",
-      desc: "Disponível ao término do disparo",
-      icon: FileText,
-      done: false,
-    },
+    ...(st === "completed" || st === "canceled" || st === "failed"
+      ? [{
+          t: hora(live?.updatedAt),
+          label: st === "completed" ? "Campanha concluída" : st === "canceled" ? "Campanha cancelada" : "Campanha encerrada com falha",
+          desc: `${n(live?.enviadas)} enviadas · ${n(live?.entregues)} entregues · ${n(live?.falhas)} falhas`,
+          icon: FileText,
+          done: true,
+        }]
+      : []),
   ];
+
+  // Conformidade: derivada da categoria real do template. Marketing exige
+  // consentimento explícito (o backend suprime quem não tem); utility e
+  // authentication se apoiam em relação contratual/interesse legítimo.
+  const catRaw = live?.categoriaRaw;
+  const baseLegal = catRaw === "MARKETING"
+    ? "Consentimento (opt-in)"
+    : catRaw === "UTILITY"
+    ? "Execução de contrato"
+    : catRaw === "AUTHENTICATION"
+    ? "Execução de contrato"
+    : "—";
+  const exigiuConsentimento = catRaw === "MARKETING";
 
   return (
     <div className="space-y-5 p-4 sm:space-y-6 sm:p-6 lg:p-7">
@@ -755,19 +795,30 @@ export function CampanhaDetalhe({ campaignId, setScreen }) {
           <h2 className="mb-4 text-sm font-semibold text-zinc-900 dark:text-white">Conformidade</h2>
           <div className="space-y-3 text-[13px]">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-zinc-500 dark:text-zinc-400">Base legal</span>
-              <span className="font-medium text-zinc-800 dark:text-zinc-100">Consentimento</span>
+              <span className="text-zinc-500 dark:text-zinc-400">Categoria</span>
+              <span className="font-medium text-zinc-800 dark:text-zinc-100">{live?.categoria ?? "—"}</span>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <span className="min-w-0 text-zinc-500 dark:text-zinc-400">Opt-out na mensagem</span>
-              <span className="inline-flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
-                <Check className="h-3.5 w-3.5" /> Incluído
+              <span className="text-zinc-500 dark:text-zinc-400">Base legal</span>
+              <span className="font-medium text-zinc-800 dark:text-zinc-100">{baseLegal}</span>
+            </div>
+            <div className="flex items-start justify-between gap-3">
+              <span className="min-w-0 text-zinc-500 dark:text-zinc-400">Consentimento exigido</span>
+              <span className="shrink-0 text-right font-medium text-zinc-800 dark:text-zinc-100">
+                {exigiuConsentimento ? "Sim — só opt-in" : "Não se aplica"}
               </span>
             </div>
-            <div className="mt-2 flex items-start gap-2 rounded-xl bg-emerald-50/70 p-3 text-[12px] text-emerald-800 dark:bg-emerald-500/5 dark:text-emerald-300">
-              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-              Disparo em conformidade com a LGPD. <a href="#" className="underline">Ver política</a>
+            <div className="flex items-start justify-between gap-3">
+              <span className="min-w-0 text-zinc-500 dark:text-zinc-400">Quem pediu para sair</span>
+              <span className="inline-flex shrink-0 items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+                <Check className="h-3.5 w-3.5" /> Suprimido
+              </span>
             </div>
+            <p className="mt-2 rounded-xl bg-zinc-50 p-3 text-[12px] leading-snug text-zinc-500 dark:bg-zinc-800/40 dark:text-zinc-400">
+              {exigiuConsentimento
+                ? "Campanha de marketing: contatos sem consentimento explícito foram removidos do público antes do disparo."
+                : "Mensagem de serviço/utilidade: enviada com base na relação existente. Quem pediu para sair continua suprimido."}
+            </p>
           </div>
         </Card>
       </div>

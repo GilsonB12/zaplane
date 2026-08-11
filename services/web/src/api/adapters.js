@@ -48,6 +48,13 @@ export function toUiCampaign(c) {
     lidas: c.readCount ?? c.read ?? 0,
     falhas: c.failedCount ?? c.failed ?? 0,
     quando: c.createdAt ? new Date(c.createdAt).toLocaleString("pt-BR") : "—",
+    // campos crus preservados: a timeline e o card de conformidade do detalhe
+    // são derivados deles (antes eram textos fixos/inventados)
+    statusRaw: c.status ?? null,
+    categoriaRaw: c.template?.category ?? null,
+    createdAt: c.createdAt ?? null,
+    scheduledAt: c.scheduledAt ?? null,
+    updatedAt: c.updatedAt ?? null,
     // custo Meta (estimado) e taxa Zaplane (estimada) — dois números de
     // origens distintas, calculados no backend na criação da campanha.
     custoEstimadoCents: c.costEstimateCents ?? null,

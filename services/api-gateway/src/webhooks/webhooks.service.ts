@@ -227,7 +227,15 @@ export class WebhooksService {
       return;
     }
 
-    const priceCents = this.config.get<number>('billing.usagePriceCents') ?? 43;
+    // Preço por CATEGORIA (utility custa muito menos que marketing na Meta).
+    // Categoria vem em minúsculas no payload da Meta ('marketing', 'utility',
+    // 'authentication', 'service'…); quando ausente/desconhecida, cai no preço
+    // padrão — nunca cobramos menos do que o configurado por engano.
+    const byCategory = this.config.get<Record<string, number>>('billing.usagePriceByCategory') ?? {};
+    const defaultPrice = this.config.get<number>('billing.usagePriceCents') ?? 43;
+    const categoryKey = (category ?? '').toLowerCase();
+    const priceCents = byCategory[categoryKey] ?? defaultPrice;
+    const isMarketing = categoryKey === 'marketing';
 
     // defesa em profundidade: outbound_messages.organization_id deveria SEMPRE
     // coincidir com a organização dona do canal autenticado (ambos derivam da
@@ -258,6 +266,28 @@ export class WebhooksService {
     }
 
     await this.prisma.$transaction(async (tx) => {
+      // Cota de marketing inclusa na assinatura: se ainda houver saldo de
+      // cota, esta mensagem de marketing não debita a taxa Zaplane. A linha da
+      // assinatura é travada (FOR UPDATE) para que dois webhooks concorrentes
+      // não consumam a mesma unidade da cota duas vezes.
+      let usouCota = false;
+      if (isMarketing) {
+        const subRows = await tx.$queryRawUnsafe<Array<{ id: string; free_marketing_remaining: number }>>(
+          `SELECT id, free_marketing_remaining FROM subscriptions
+            WHERE organization_id = $1::uuid FOR UPDATE`,
+          organizationId,
+        );
+        const sub = subRows[0];
+        if (sub && sub.free_marketing_remaining > 0) {
+          await tx.$executeRawUnsafe(
+            `UPDATE subscriptions SET free_marketing_remaining = free_marketing_remaining - 1
+              WHERE id = $1::uuid`,
+            sub.id,
+          );
+          usouCota = true;
+        }
+      }
+
       // trava a linha da carteira da organização (se existir) — evita corrida
       // entre débitos concorrentes calculando balance_after_cents errado.
       const walletRows = await tx.$queryRawUnsafe<Array<{ balance_cents: number }>>(
@@ -274,18 +304,26 @@ export class WebhooksService {
       // tornar este caminho inatingível na prática — o envio é bloqueado antes
       // de a Meta chegar a tarifar. Mesmo assim, para manter o livro-razão
       // auditável, registramos a diferença não coberta em `metadata.shortfall_cents`.
-      const newBalance = Math.max(currentBalance - priceCents, 0);
+      // valor efetivamente cobrado: zero quando a mensagem saiu pela cota inclusa
+      const cobrarCents = usouCota ? 0 : priceCents;
+      const newBalance = Math.max(currentBalance - cobrarCents, 0);
       const actuallyDeducted = currentBalance - newBalance;
-      const shortfallCents = priceCents - actuallyDeducted;
-      const metadata = shortfallCents > 0 ? { shortfall_cents: shortfallCents } : {};
+      const shortfallCents = cobrarCents - actuallyDeducted;
+      const metadata: Record<string, unknown> = {};
+      if (shortfallCents > 0) metadata.shortfall_cents = shortfallCents;
+      if (usouCota) metadata.cota_inclusa = true;
+      if (categoryKey) metadata.categoria = categoryKey;
 
+      // amount_cents registra o que SAIU da carteira (não o preço de tabela),
+      // para que o livro-razão reconcilie: saldo_anterior - amount = balance_after.
+      // O que ficou a descoberto vive em metadata.shortfall_cents.
       const inserted = await tx.$queryRawUnsafe<Array<{ id: bigint }>>(
         `INSERT INTO wallet_transactions
            (organization_id, kind, amount_cents, balance_after_cents, reason, outbound_message_id, wa_message_id, metadata)
          VALUES ($1::uuid, 'debit', $2::int, $3::int, 'message', $4::uuid, $5, $6::jsonb)
          ON CONFLICT (organization_id, wa_message_id) WHERE kind = 'debit' DO NOTHING
          RETURNING id`,
-        organizationId, priceCents, newBalance, msg.id, msg.waMessageId, JSON.stringify(metadata),
+        organizationId, actuallyDeducted, newBalance, msg.id, msg.waMessageId, JSON.stringify(metadata),
       );
 
       if (inserted.length > 0 && hasWallet) {

@@ -39,18 +39,11 @@ export class AuthService {
           role: 'owner',
         },
       });
-      // cria canal placeholder para que a org possa enfileirar localmente
-      // sem credenciais reais da Meta (dispensado por looksConfigured)
-      await tx.whatsappChannel.create({
-        data: {
-          organizationId: org.id,
-          label: 'Canal padrão',
-          phoneNumberId: 'LOCAL_DEV',
-          wabaId: 'LOCAL_DEV',
-          accessTokenEnc: 'LOCAL_DEV',
-          status: 'active',
-        },
-      });
+      // NÃO criamos mais canal placeholder aqui. O antigo canal 'LOCAL_DEV'
+      // aparecia como "Ativo" no painel de todo cliente novo e era elegível
+      // para envio — o dispatcher tentava usar o literal 'LOCAL_DEV' como
+      // token e a Meta respondia 401. Organização nova nasce sem canal e o
+      // painel orienta a conectar um número de verdade.
       // cria a carteira pré-paga (saldo 0) da org — sem isso, o débito de
       // billing (webhooks.service.ts) cai no ramo "sem carteira provisionada"
       // e nunca desconta nada (ver review B1, Fix 2).
@@ -67,7 +60,10 @@ export class AuthService {
           organizationId: org.id,
           status: 'inactive',
           provider: 'asaas',
-          priceCents: this.config.get<number>('billing.subscriptionPriceCents') ?? 13500,
+          priceCents: this.config.get<number>('billing.subscriptionPriceCents') ?? 14900,
+          // cota de mensagens de marketing inclusa na assinatura (consumida em
+          // webhooks.service.ts::recordPricing quando a Meta tarifa marketing)
+          freeMarketingRemaining: this.config.get<number>('billing.freeMarketingQuota') ?? 200,
         },
       });
       return { org, user };
@@ -84,6 +80,28 @@ export class AuthService {
 
     await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
     return this.issueTokens(user);
+  }
+
+  /** Perfil do usuário autenticado + nome da organização. Usado pelo painel
+   *  para exibir quem está logado (antes o nome era literal no JSX) e para
+   *  reidratar a identidade depois de um F5, quando só o token sobrevive. */
+  async me(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true, email: true, name: true, role: true, organizationId: true,
+        organization: { select: { name: true } },
+      },
+    });
+    if (!user) throw new UnauthorizedException('Usuário não encontrado.');
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      organizationId: user.organizationId,
+      organizationName: user.organization?.name ?? null,
+    };
   }
 
   private async issueTokens(user: { id: string; organizationId: string; role: string; email: string }) {

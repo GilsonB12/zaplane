@@ -6,24 +6,52 @@ import {
 import { TEAL, Card, ProgressBar } from "../components/ui.jsx";
 import { useResource } from "../hooks/useResource.js";
 import { toUiCampaign } from "../api/adapters.js";
-import { listContacts, listCampaigns } from "../api/endpoints.js";
+import { listCampaigns, getDashboardMetrics } from "../api/endpoints.js";
 
-/* ----------------------------- Dashboard parcial-live ----------------------------- */
+/* ----------------------------- Dashboard ----------------------------- */
 export default function Dashboard({ setScreen, openCampaign }) {
-  // Dados reais: total de contatos e últimas campanhas
-  const contatosRes = useResource(() => listContacts({ pageSize: 1 }), []);
-  const campRes     = useResource(() => listCampaigns({ pageSize: 5 }), []);
+  // Todos os indicadores vêm de /metrics/dashboard (contagens reais no banco).
+  const metricsRes = useResource(getDashboardMetrics, []);
+  const campRes    = useResource(() => listCampaigns({ pageSize: 5 }), []);
 
-  const totalContatos = contatosRes.data?.total ?? 0;
-  const ultimas       = (campRes.data?.items ?? []).map(toUiCampaign);
+  const m       = metricsRes.data ?? null;
+  const ultimas = (campRes.data?.items ?? []).map(toUiCampaign);
 
-  // KPIs: apenas "Contatos ativos" é live; os demais são placeholders para a próxima fatia
+  const num = (v) => (v ?? 0).toLocaleString("pt-BR");
+  // enquanto carrega mostra "…"; taxa de entrega sem envios no dia é "—" com
+  // legenda explicando (0% sugeriria falha, o que seria mentira)
+  const val = (fn) => (metricsRes.loading ? "…" : metricsRes.error ? "—" : fn());
+
   const kpis = [
-    { id: "contatos", label: "Contatos ativos", valueNode: contatosRes.loading ? "…" : totalContatos.toLocaleString("pt-BR"), icon: Users, live: true },
-    { id: "enviadas", label: "Enviadas hoje",   valueNode: "—",   icon: Send,        live: false },
-    { id: "entrega",  label: "Taxa de entrega", valueNode: "—",   icon: CheckCheck,  live: false },
-    { id: "optout",   label: "Opt-outs (30d)",  valueNode: "—",   icon: ShieldCheck, live: false },
+    {
+      id: "contatos", label: "Contatos ativos", icon: Users,
+      valueNode: val(() => num(m?.contatosAtivos)),
+      hint: "Contatos que não saíram da base",
+    },
+    {
+      id: "enviadas", label: "Enviadas hoje", icon: Send,
+      valueNode: val(() => num(m?.enviadasHoje)),
+      hint: m?.falhasHoje ? `${num(m.falhasHoje)} falha(s) hoje` : "Mensagens que saíram hoje",
+    },
+    {
+      id: "entrega", label: "Taxa de entrega", icon: CheckCheck,
+      valueNode: val(() => (m?.taxaEntregaPct == null ? "—" : `${m.taxaEntregaPct}%`)),
+      hint: m?.taxaEntregaPct == null ? "Sem envios hoje" : `${num(m?.entreguesHoje)} de ${num(m?.enviadasHoje)} entregues`,
+    },
+    {
+      id: "optout", label: "Opt-outs (30d)", icon: ShieldCheck,
+      valueNode: val(() => num(m?.optOuts30d)),
+      hint: "Pediram para não receber",
+    },
   ];
+
+  const canal = m?.canal ?? null;
+  const QUALIDADE = {
+    GREEN:  { label: "Alta",  cls: "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300" },
+    YELLOW: { label: "Média", cls: "bg-amber-50 text-amber-700 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-300" },
+    RED:    { label: "Baixa", cls: "bg-red-50 text-red-700 ring-red-600/20 dark:bg-red-500/10 dark:text-red-300" },
+  };
+  const qual = canal?.qualityRating ? QUALIDADE[canal.qualityRating] : null;
 
   // Estado agregado da lista de campanhas (compartilhado pelas visões mobile e desktop)
   const estadoLista = campRes.loading
@@ -46,39 +74,75 @@ export default function Dashboard({ setScreen, openCampaign }) {
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-[#0F8C5A] dark:bg-emerald-500/10 dark:text-emerald-300">
                   <I className="h-[18px] w-[18px]" />
                 </div>
-                {k.live ? (
-                  <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300">
-                    ao vivo
-                  </span>
-                ) : (
-                  <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400 ring-1 ring-inset ring-zinc-500/20 dark:bg-zinc-800 dark:text-zinc-500">
-                    em breve
-                  </span>
-                )}
               </div>
-              <div className="mt-3 break-words text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white sm:mt-4">
+              <div className="mt-3 break-words text-2xl font-semibold tabular-nums tracking-tight text-zinc-900 dark:text-white sm:mt-4">
                 {k.valueNode}
               </div>
               <div className="text-[13px] text-zinc-500 dark:text-zinc-400">{k.label}</div>
+              {k.hint && <div className="mt-0.5 text-[11px] text-zinc-400">{k.hint}</div>}
             </Card>
           );
         })}
       </div>
 
-      {/* Saúde do número — placeholder rotulado */}
+      {/* Saúde do número — dados reais do canal conectado */}
       <Card className="p-4 sm:p-5">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Saúde do número</h2>
-            <p className="text-[13px] text-zinc-500 dark:text-zinc-400">Canal de envio</p>
+            <p className="truncate text-[13px] text-zinc-500 dark:text-zinc-400">
+              {canal ? (canal.displayNumber || canal.label) : "Canal de envio"}
+            </p>
           </div>
-          <span className="inline-flex w-fit shrink-0 items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-400 ring-1 ring-inset ring-zinc-500/20 dark:bg-zinc-800 dark:text-zinc-500">
-            em breve — Fatia 2
-          </span>
+          {qual && (
+            <span className={`inline-flex w-fit shrink-0 items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${qual.cls}`}>
+              Qualidade: {qual.label}
+            </span>
+          )}
         </div>
-        <p className="mt-3 text-[13px] text-zinc-400 dark:text-zinc-500">
-          Os dados de quality rating, limite diário e status do número serão exibidos quando a integração de canais estiver disponível.
-        </p>
+
+        {metricsRes.loading ? (
+          <p className="mt-3 text-[13px] text-zinc-400">Carregando…</p>
+        ) : canal ? (
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <div className="text-[11px] text-zinc-400">Status</div>
+              <div className="mt-0.5 text-sm font-medium text-zinc-800 dark:text-zinc-100">
+                {canal.status === "active" ? "Conectado" : canal.status}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-zinc-400">Qualidade</div>
+              <div className="mt-0.5 text-sm font-medium text-zinc-800 dark:text-zinc-100">
+                {qual?.label ?? "Sem dados ainda"}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-zinc-400">Limite por segundo</div>
+              <div className="mt-0.5 text-sm font-medium tabular-nums text-zinc-800 dark:text-zinc-100">
+                {canal.throughputLimit ?? "—"}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-zinc-400">Conectado via</div>
+              <div className="mt-0.5 text-sm font-medium text-zinc-800 dark:text-zinc-100">
+                {canal.connectedVia === "embedded_signup" ? "WhatsApp" : "Manual"}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 flex flex-col items-start gap-2">
+            <p className="text-[13px] text-zinc-500 dark:text-zinc-400">
+              Nenhum número conectado. Conecte um número do WhatsApp Business para disparar campanhas.
+            </p>
+            <button
+              onClick={() => setScreen("config")}
+              className="text-[13px] font-medium text-[#0F8C5A] hover:underline dark:text-emerald-300"
+            >
+              Conectar número
+            </button>
+          </div>
+        )}
       </Card>
 
       {/* Últimas campanhas — live */}

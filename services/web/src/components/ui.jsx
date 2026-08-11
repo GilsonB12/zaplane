@@ -189,7 +189,6 @@ export function Sidebar({ screen, setScreen, open = false, onClose = () => {} })
                          : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}>
                 <I className="h-[18px] w-[18px] shrink-0" />
                 {n.label}
-                {n.id === "campanhas" && <span className="ml-auto rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300">1</span>}
               </button>
             );
           })}
@@ -209,7 +208,41 @@ export function Sidebar({ screen, setScreen, open = false, onClose = () => {} })
 }
 
 /* ----------------------------- Topbar ----------------------------- */
-export function Topbar({ title, subtitle, dark, setDark, actions, onLogout, onMenu }) {
+/* ----------------------------- Papéis (RBAC) ----------------------------- */
+// rótulos em português para os papéis gravados no banco
+export const ROLE_LABEL = {
+  owner: "Owner",
+  admin: "Admin",
+  operator: "Operador",
+  viewer: "Leitor",
+};
+export const ROLE_DESC = {
+  owner: "Acesso total, billing e exclusão da conta.",
+  admin: "Gerencia campanhas, contatos, templates e equipe.",
+  operator: "Cria e dispara campanhas. Sem acesso a billing.",
+  viewer: "Apenas visualização de relatórios.",
+};
+export const ROLE_CLS = {
+  owner: "bg-violet-50 text-violet-700 ring-violet-600/20 dark:bg-violet-500/10 dark:text-violet-300",
+  admin: "bg-sky-50 text-sky-700 ring-sky-600/20 dark:bg-sky-500/10 dark:text-sky-300",
+  operator: "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300",
+  viewer: "bg-zinc-100 text-zinc-600 ring-zinc-500/20 dark:bg-zinc-700/40 dark:text-zinc-300",
+};
+
+// Iniciais para o avatar. Sem nome cadastrado, usa a primeira letra do e-mail —
+// nunca inventa um nome.
+export function iniciaisDe(nome, email) {
+  const base = (nome || "").trim();
+  if (base) {
+    return base.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+  }
+  return (email || "?").trim().slice(0, 2).toUpperCase();
+}
+
+/* ----------------------------- Topbar ----------------------------- */
+export function Topbar({ title, subtitle, dark, setDark, actions, onLogout, onMenu, user, carregandoUser }) {
+  const nomeExibido = user?.name || user?.email || (carregandoUser ? "…" : "Minha conta");
+  const papel = ROLE_LABEL[user?.role] ?? (user?.role || "");
   return (
     <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-zinc-200 bg-white/80 px-3 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/80 sm:gap-3 sm:px-5 sm:py-4 lg:px-7">
       {/* Abrir navegação — só no mobile, onde a sidebar é drawer */}
@@ -230,11 +263,13 @@ export function Topbar({ title, subtitle, dark, setDark, actions, onLogout, onMe
           {dark ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
         </button>
         {/* Identidade: só o avatar no mobile; nome e papel a partir de md */}
-        <div className="flex items-center gap-2 rounded-xl border border-zinc-200 p-1.5 dark:border-zinc-800 md:pr-3">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-xs font-semibold text-white dark:bg-zinc-700">AB</div>
-          <div className="hidden leading-tight whitespace-nowrap md:block">
-            <div className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">Ana Beatriz</div>
-            <div className="text-[10px] text-zinc-400">Owner</div>
+        <div className="flex items-center gap-2 rounded-xl border border-zinc-200 p-1.5 dark:border-zinc-800 md:pr-3" title={user?.email || undefined}>
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-xs font-semibold text-white dark:bg-zinc-700">
+            {iniciaisDe(user?.name, user?.email)}
+          </div>
+          <div className="hidden leading-tight md:block">
+            <div className="max-w-[160px] truncate text-xs font-semibold text-zinc-800 dark:text-zinc-100">{nomeExibido}</div>
+            {papel && <div className="text-[10px] text-zinc-400">{papel}</div>}
           </div>
         </div>
         {onLogout && (

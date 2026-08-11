@@ -27,10 +27,24 @@ export default () => ({
   encryptionKey: process.env.APP_ENCRYPTION_KEY || '',
   webhookPublicUrl: process.env.WEBHOOK_PUBLIC_URL || '',
   billing: {
-    // preço fixo por mensagem efetivamente tarifada pela Meta (R$0,43 = 43 centavos)
+    // Taxa Zaplane por mensagem efetivamente tarifada pela Meta, POR CATEGORIA.
+    // A tarifa da Meta varia muito entre categorias (marketing ~R$0,34 vs
+    // utility ~R$0,04), então uma taxa única penalizava utility em ~10x. O
+    // preço abaixo é o que debitamos da carteira; o custo da Meta é cobrado
+    // por ela diretamente, no cartão da WABA do cliente.
     usagePriceCents: parseInt(process.env.BILLING_USAGE_PRICE_CENTS || '43', 10),
-    // preço da assinatura mensal (R$135,00 = 13500 centavos)
-    subscriptionPriceCents: parseInt(process.env.BILLING_SUBSCRIPTION_PRICE_CENTS || '13500', 10),
+    usagePriceByCategory: {
+      // R$0,10 — cobre a tarifa Meta (~R$0,04) e mantém margem
+      utility: parseInt(process.env.BILLING_USAGE_PRICE_UTILITY_CENTS || '10', 10),
+      // R$0,43 — tarifa Meta de marketing é ~R$0,34
+      marketing: parseInt(process.env.BILLING_USAGE_PRICE_MARKETING_CENTS || '43', 10),
+      authentication: parseInt(process.env.BILLING_USAGE_PRICE_AUTH_CENTS || '43', 10),
+    } as Record<string, number>,
+    // Mensagens de marketing inclusas na assinatura (concedidas uma vez, no
+    // provisionamento da organização) — ver subscriptions.free_marketing_remaining.
+    freeMarketingQuota: parseInt(process.env.BILLING_FREE_MARKETING_QUOTA || '200', 10),
+    // preço da assinatura mensal (R$149,00 = 14900 centavos)
+    subscriptionPriceCents: parseInt(process.env.BILLING_SUBSCRIPTION_PRICE_CENTS || '14900', 10),
     // provedor de pagamento ativo por trás da interface PaymentProviderAdapter
     // (billing/providers/) — hoje só 'asaas' está implementado.
     paymentProvider: process.env.PAYMENT_PROVIDER || 'asaas',

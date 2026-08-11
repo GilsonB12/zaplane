@@ -4,9 +4,9 @@ import {
   Phone, CreditCard, UserCog,
   Info, AlertTriangle, Wallet, Receipt,
 } from "lucide-react";
-import { Card, PrimaryBtn } from "../components/ui.jsx";
+import { Card, PrimaryBtn, ROLE_LABEL, ROLE_DESC, ROLE_CLS, iniciaisDe } from "../components/ui.jsx";
 import { useResource, useMutation } from "../hooks/useResource.js";
-import { listChannels, disconnectChannel, getBillingSummary, buyCredits } from "../api/endpoints.js";
+import { listChannels, disconnectChannel, getBillingSummary, buyCredits, listMembers } from "../api/endpoints.js";
 import { formatBRL } from "../utils/money.js";
 import ConectarWhatsAppButton from "../components/ConectarWhatsAppButton.jsx";
 import ConectarManualModal from "../components/ConectarManualModal.jsx";
@@ -344,52 +344,121 @@ function AbaBilling() {
   );
 }
 
-/* ----------------------------- Dados de exemplo (equipe) ----------------------------- */
-// Equipe ainda é exemplo — será ligada à API na Fatia 2
-const MEMBROS = [
-  { id: 1, nome: "Ana Beatriz",   email: "ana@zaplane.com.br",    papel: "Owner" },
-  { id: 2, nome: "Carlos Eduardo", email: "carlos@zaplane.com.br", papel: "Admin" },
-  { id: 3, nome: "Renata Souza",  email: "renata@zaplane.com.br", papel: "Operador" },
-  { id: 4, nome: "Tiago Melo",    email: "tiago@zaplane.com.br",  papel: "Leitor" },
-];
-
-const RBAC_DESC = {
-  Owner:    "Acesso total, billing e exclusão da conta.",
-  Admin:    "Gerencia campanhas, contatos, templates e equipe.",
-  Operador: "Cria e dispara campanhas. Sem acesso a billing.",
-  Leitor:   "Apenas visualização de relatórios.",
-};
-const RBAC_CLS = {
-  Owner:    "bg-violet-50 text-violet-700 ring-violet-600/20 dark:bg-violet-500/10 dark:text-violet-300",
-  Admin:    "bg-sky-50 text-sky-700 ring-sky-600/20 dark:bg-sky-500/10 dark:text-sky-300",
-  Operador: "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300",
-  Leitor:   "bg-zinc-100 text-zinc-600 ring-zinc-500/20 dark:bg-zinc-700/40 dark:text-zinc-300",
-};
-
+/* ----------------------------- Equipe (dados reais) ----------------------------- */
 /* Pedaços reusados pela lista de equipe (cards no mobile + tabela no desktop) */
-const iniciais = (nome) => nome.split(" ").map((n) => n[0]).slice(0, 2).join("");
-
-function AvatarMembro({ nome }) {
+function AvatarMembro({ nome, email }) {
   return (
     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300">
-      {iniciais(nome)}
+      {iniciaisDe(nome, email)}
     </div>
   );
 }
 
 function PapelBadge({ papel }) {
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${RBAC_CLS[papel]}`}>
-      {papel}
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${ROLE_CLS[papel] ?? ROLE_CLS.viewer}`}>
+      {ROLE_LABEL[papel] ?? papel}
     </span>
   );
 }
 
-function BotaoAcoesMembro() {
+// "há 3 dias" / "hoje" — para a coluna de último acesso
+function quandoRelativo(iso) {
+  if (!iso) return "nunca";
+  const dias = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  if (dias <= 0) return "hoje";
+  if (dias === 1) return "ontem";
+  if (dias < 30) return `há ${dias} dias`;
+  return new Date(iso).toLocaleDateString("pt-BR");
+}
+
+function AbaEquipe() {
+  const membrosRes = useResource(listMembers, []);
+  const membros = membrosRes.data?.items ?? [];
+
+  if (membrosRes.loading) {
+    return (
+      <div className="flex items-center justify-center py-16 text-[13px] text-zinc-400">
+        Carregando equipe…
+      </div>
+    );
+  }
+  if (membrosRes.error) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-16">
+        <div className="rounded-lg bg-red-50 px-4 py-3 text-[13px] text-red-700 dark:bg-red-500/10 dark:text-red-300">
+          Falha ao carregar a equipe: {membrosRes.error.message || String(membrosRes.error)}
+        </div>
+        <button
+          onClick={membrosRes.reload}
+          className="rounded-xl border border-zinc-200 px-3.5 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:py-2"
+        >
+          Tentar novamente
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <button className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 lg:h-auto lg:w-auto lg:p-1.5 dark:hover:bg-zinc-800">
-      <MoreVertical className="h-4 w-4" />
-    </button>
+    <Card className="overflow-hidden">
+      <div className="flex flex-col gap-1 px-4 py-4 sm:px-5">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">
+          Membros da equipe <span className="font-normal text-zinc-400">({membros.length})</span>
+        </h2>
+        <p className="text-[12px] text-zinc-500 dark:text-zinc-400">
+          Convite por e-mail ainda não está disponível. Para adicionar alguém à sua organização,
+          fale com o suporte do Zaplane.
+        </p>
+      </div>
+
+      {/* Mobile: lista de cards */}
+      <ul className="border-t border-zinc-100 lg:hidden dark:border-zinc-800">
+        {membros.map((m) => (
+          <li key={m.id} className="flex items-start gap-3 border-b border-zinc-100 px-4 py-3.5 last:border-0 dark:border-zinc-800/60">
+            <AvatarMembro nome={m.name} email={m.email} />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="truncate text-sm font-medium text-zinc-800 dark:text-zinc-100">{m.name || m.email}</span>
+                <PapelBadge papel={m.role} />
+              </div>
+              <div className="truncate text-[12px] text-zinc-400">{m.email}</div>
+              <div className="mt-1 text-[12px] leading-snug text-zinc-500 dark:text-zinc-400">{ROLE_DESC[m.role] ?? ""}</div>
+              <div className="mt-1 text-[11px] text-zinc-400">Último acesso: {quandoRelativo(m.lastLoginAt)}</div>
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      {/* Desktop: tabela */}
+      <table className="hidden w-full text-sm lg:table">
+        <thead>
+          <tr className="border-y border-zinc-100 bg-zinc-50/60 text-left text-[11px] uppercase tracking-wide text-zinc-400 dark:border-zinc-800 dark:bg-zinc-800/40">
+            <th className="px-5 py-2.5 font-medium">Membro</th>
+            <th className="px-3 py-2.5 font-medium">Papel</th>
+            <th className="px-3 py-2.5 font-medium">Permissões</th>
+            <th className="px-5 py-2.5 font-medium">Último acesso</th>
+          </tr>
+        </thead>
+        <tbody>
+          {membros.map((m) => (
+            <tr key={m.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60">
+              <td className="px-5 py-3">
+                <div className="flex items-center gap-3">
+                  <AvatarMembro nome={m.name} email={m.email} />
+                  <div className="min-w-0">
+                    <div className="truncate font-medium text-zinc-800 dark:text-zinc-100">{m.name || m.email}</div>
+                    <div className="truncate text-[12px] text-zinc-400">{m.email}</div>
+                  </div>
+                </div>
+              </td>
+              <td className="px-3 py-3"><PapelBadge papel={m.role} /></td>
+              <td className="px-3 py-3 text-[12px] text-zinc-500 dark:text-zinc-400">{ROLE_DESC[m.role] ?? ""}</td>
+              <td className="px-5 py-3 text-[12px] text-zinc-400">{quandoRelativo(m.lastLoginAt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
   );
 }
 
@@ -436,13 +505,6 @@ export default function Configuracoes() {
 
   return (
     <div className="space-y-4 p-4 sm:space-y-5 sm:p-6 lg:p-7">
-      {/* Banner de aviso — dados de exemplo (Equipe segue mock; Conexão e Billing já são live) */}
-      {tab === "equipe" && (
-        <div className="rounded-xl bg-amber-50 px-4 py-2 text-[13px] text-amber-800 ring-1 ring-inset ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-300">
-          Dados de exemplo — Equipe entra na próxima fatia.
-        </div>
-      )}
-
       <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
         <div className="flex w-max min-w-full items-center gap-1 rounded-xl border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-900 sm:w-fit sm:min-w-0">
         {tabs.map((t) => {
@@ -581,66 +643,7 @@ export default function Configuracoes() {
         </div>
       )}
 
-      {tab === "equipe" && (
-        <Card className="overflow-hidden">
-          <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Membros da equipe</h2>
-            <PrimaryBtn className="w-full sm:w-auto"><Plus className="h-4 w-4" /> Convidar membro</PrimaryBtn>
-          </div>
-
-          {/* Mobile: lista de cards */}
-          <ul className="border-t border-zinc-100 lg:hidden dark:border-zinc-800">
-            {MEMBROS.map((m) => (
-              <li key={m.id} className="flex items-start gap-3 border-b border-zinc-100 px-4 py-3.5 last:border-0 dark:border-zinc-800/60">
-                <AvatarMembro nome={m.nome} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="truncate text-sm font-medium text-zinc-800 dark:text-zinc-100">{m.nome}</span>
-                    <PapelBadge papel={m.papel} />
-                  </div>
-                  <div className="truncate text-[12px] text-zinc-400">{m.email}</div>
-                  <div className="mt-1 text-[12px] leading-snug text-zinc-500 dark:text-zinc-400">{RBAC_DESC[m.papel]}</div>
-                </div>
-                <BotaoAcoesMembro />
-              </li>
-            ))}
-          </ul>
-
-          {/* Desktop: tabela */}
-          <table className="hidden w-full text-sm lg:table">
-            <thead>
-              <tr className="border-y border-zinc-100 bg-zinc-50/60 text-left text-[11px] uppercase tracking-wide text-zinc-400 dark:border-zinc-800 dark:bg-zinc-800/40">
-                <th className="px-5 py-2.5 font-medium">Membro</th>
-                <th className="px-3 py-2.5 font-medium">Papel</th>
-                <th className="px-3 py-2.5 font-medium">Permissões</th>
-                <th className="px-5 py-2.5"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {MEMBROS.map((m) => (
-                <tr key={m.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60">
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-3">
-                      <AvatarMembro nome={m.nome} />
-                      <div>
-                        <div className="font-medium text-zinc-800 dark:text-zinc-100">{m.nome}</div>
-                        <div className="text-[12px] text-zinc-400">{m.email}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-3 py-3">
-                    <PapelBadge papel={m.papel} />
-                  </td>
-                  <td className="px-3 py-3 text-[12px] text-zinc-500 dark:text-zinc-400">{RBAC_DESC[m.papel]}</td>
-                  <td className="px-5 py-3 text-right">
-                    <BotaoAcoesMembro />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      )}
+      {tab === "equipe" && <AbaEquipe />}
 
       {tab === "billing" && <AbaBilling />}
     </div>
