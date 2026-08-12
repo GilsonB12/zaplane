@@ -13,6 +13,7 @@ import {
 import { formatBRL } from "../utils/money.js";
 import ConectarWhatsAppButton from "../components/ConectarWhatsAppButton.jsx";
 import ConectarManualModal from "../components/ConectarManualModal.jsx";
+import GuiaPagamentoMeta from "../components/GuiaPagamentoMeta.jsx";
 
 /* ----------------------------- Metadados da aba Conexão ----------------------------- */
 const VIA_META = {
@@ -543,6 +544,8 @@ export default function Configuracoes() {
   const [tab, setTab] = useState("meta");
   const [modalManualAberto, setModalManualAberto] = useState(false);
   const [erroDesconectar, setErroDesconectar] = useState(null);
+  // canal cujo guia de forma de pagamento está aberto (null = fechado)
+  const [guiaPagamento, setGuiaPagamento] = useState(null);
   const tabs = [
     { id: "meta",    label: "Conexão Meta",   icon: Phone },
     { id: "equipe",  label: "Equipe (RBAC)",  icon: UserCog },
@@ -655,25 +658,20 @@ export default function Configuracoes() {
                     <strong>{c.displayNumber || c.label}</strong> param depois de um período inicial.
                   </p>
 
-                  <ol className="mt-3 list-decimal space-y-1 pl-5 text-[13px] text-amber-800 dark:text-amber-300">
-                    <li>
-                      Abra o link abaixo <strong>logado na mesma conta do Facebook</strong> que você
-                      usou para conectar este número — em outra conta, a conta do WhatsApp não aparece.
-                    </li>
-                    <li>Vá em <strong>Formas de pagamento</strong> → aba <strong>Contas do WhatsApp Business</strong>.</li>
-                    <li>Selecione a conta <strong>{c.label}</strong> e clique em <strong>Adicionar forma de pagamento</strong>.</li>
-                    <li>País <strong>Brasil</strong> e moeda <strong>Real brasileiro</strong> — a moeda não pode ser alterada depois.</li>
-                  </ol>
+                  <p className="mt-2 text-[13px] leading-snug text-amber-800 dark:text-amber-300">
+                    Você precisa estar logado na <strong>mesma conta do Facebook</strong> usada para
+                    conectar este número, e escolher a moeda <strong>Real brasileiro</strong> (que não
+                    pode ser alterada depois).
+                  </p>
 
                   <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <a
-                      href="https://business.facebook.com/billing_hub/payment_methods"
-                      target="_blank" rel="noopener noreferrer"
+                    <button
+                      onClick={() => setGuiaPagamento(c)}
                       className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2.5 text-[13px] font-semibold text-white hover:opacity-90 sm:py-2"
                       style={{ backgroundColor: "#0F8C5A" }}
                     >
-                      <CreditCard className="h-3.5 w-3.5" /> Cadastrar na Meta
-                    </a>
+                      <CreditCard className="h-3.5 w-3.5" /> Ver como cadastrar
+                    </button>
                     <button
                       onClick={() => onConfirmarPagamento(c.id)}
                       disabled={ackPagamento.pending}
@@ -782,6 +780,10 @@ export default function Configuracoes() {
               onClose={() => setModalManualAberto(false)}
               onConnected={canaisRes.reload}
             />
+          )}
+
+          {guiaPagamento && (
+            <GuiaPagamentoMeta canal={guiaPagamento} onClose={() => setGuiaPagamento(null)} />
           )}
         </div>
       )}
