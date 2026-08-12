@@ -2,7 +2,7 @@ import { ConflictException, Injectable, Logger, UnauthorizedException } from '@n
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -193,10 +193,15 @@ export class AuthService {
       expiresIn: this.config.get<number>('jwt.accessTtl'),
     });
     const refreshTtl = this.config.get<number>('jwt.refreshTtl') ?? 2592000;
-    const refreshToken = await this.jwt.signAsync(payload, {
-      secret: this.config.get('jwt.refreshSecret'),
-      expiresIn: refreshTtl,
-    });
+    // `jti` único por emissão. Sem ele, dois refresh emitidos no MESMO segundo
+    // sairiam byte a byte idênticos (payload e `iat` iguais) — e como o token
+    // anterior acabou de ser revogado, o "novo" bateria com um hash revogado e
+    // a rotação seria interpretada como reúso, derrubando todas as sessões do
+    // usuário. Foi exatamente o que o teste de rotação apanhou.
+    const refreshToken = await this.jwt.signAsync(
+      { ...payload, jti: randomUUID() },
+      { secret: this.config.get('jwt.refreshSecret'), expiresIn: refreshTtl },
+    );
 
     // persiste o hash para permitir rotação e revogação
     await this.prisma.refreshToken.create({
