@@ -19,6 +19,13 @@ export default () => ({
     refreshTtl: parseInt(process.env.JWT_REFRESH_TTL || '2592000', 10),
   },
   importerUrl: process.env.IMPORTER_URL || 'http://localhost:8000',
+  // URL pública do painel — usada para montar links enviados por e-mail
+  // (ex.: redefinição de senha). Sem isso o link sairia relativo e quebrado.
+  appPublicUrl: process.env.APP_PUBLIC_URL || 'https://zaplane.com.br',
+  mail: {
+    resendApiKey: process.env.RESEND_API_KEY || '',
+    from: process.env.MAIL_FROM || 'Zaplane <onboarding@resend.dev>',
+  },
   whatsapp: {
     graphVersion: process.env.WHATSAPP_GRAPH_API_VERSION || 'v21.0',
     webhookVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || '',

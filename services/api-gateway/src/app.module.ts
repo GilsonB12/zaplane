@@ -18,6 +18,7 @@ import { ChannelsModule } from './channels/channels.module';
 import { BillingModule } from './billing/billing.module';
 import { MembersModule } from './members/members.module';
 import { MetricsModule } from './metrics/metrics.module';
+import { MailModule } from './common/mail/mail.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { MetricsModule } from './metrics/metrics.module';
     // rate limiting global: 120 req / 60s por IP (ajuste por rota se preciso)
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     PrismaModule,
+    MailModule,
     AuthModule,
     ContactsModule,
     ListsModule,

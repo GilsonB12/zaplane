@@ -1,9 +1,16 @@
-import { ConflictException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
-import { createHash, randomUUID } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../common/mail/mail.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
@@ -27,6 +34,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwt: JwtService,
     private config: ConfigService,
+    private mail: MailService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -112,6 +120,94 @@ export class AuthService {
       organizationId: user.organizationId,
       organizationName: user.organization?.name ?? null,
     };
+  }
+
+  /** Inicia a recuperação de senha: gera um token de uso único e manda o link
+   *  por e-mail.
+   *
+   *  A resposta é SEMPRE a mesma, exista o e-mail ou não. Responder "e-mail não
+   *  encontrado" transformaria esta rota num verificador de cadastro — daria
+   *  para descobrir quem é cliente do Zaplane só testando endereços. */
+  async forgotPassword(email: string, ip?: string) {
+    const respostaNeutra = {
+      ok: true,
+      message: 'Se este e-mail estiver cadastrado, enviamos as instruções de redefinição.',
+    };
+
+    const normalizado = String(email ?? '').trim().toLowerCase();
+    if (!normalizado) return respostaNeutra;
+
+    const user = await this.prisma.user.findFirst({
+      where: { email: { equals: normalizado, mode: 'insensitive' } },
+    });
+    if (!user || user.status !== 'active') return respostaNeutra;
+
+    // invalida pedidos anteriores ainda abertos: um clique novo deve tornar o
+    // link antigo inútil (senão vários links válidos circulam pela caixa)
+    await this.prisma.passwordResetToken.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    const token = randomBytes(32).toString('base64url');
+    const validadeMin = 60;
+    await this.prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashToken(token),
+        expiresAt: new Date(Date.now() + validadeMin * 60 * 1000),
+        requestedIp: ip ?? null,
+      },
+    });
+
+    const base = this.config.get<string>('appPublicUrl') ?? 'https://zaplane.com.br';
+    const link = `${base}/?redefinir=${token}`;
+    await this.mail.send({
+      to: user.email,
+      subject: 'Redefinir sua senha do Zaplane',
+      text:
+        `Olá${user.name ? `, ${user.name}` : ''}.\n\n` +
+        `Recebemos um pedido para redefinir a senha da sua conta no Zaplane.\n\n` +
+        `Abra este link para escolher uma nova senha (vale por ${validadeMin} minutos):\n${link}\n\n` +
+        `Se não foi você que pediu, ignore este e-mail — sua senha continua a mesma.`,
+      html: emailRedefinicaoHtml(user.name, link, validadeMin),
+    });
+
+    return respostaNeutra;
+  }
+
+  /** Conclui a redefinição: valida o token, troca a senha e encerra todas as
+   *  sessões abertas (se a senha foi redefinida por suspeita de invasão, deixar
+   *  sessões antigas vivas anularia o efeito). */
+  async resetPassword(token: string, novaSenha: string) {
+    if (!token || !novaSenha || novaSenha.length < 8) {
+      throw new BadRequestException('Link inválido ou senha muito curta (mínimo 8 caracteres).');
+    }
+
+    const registro = await this.prisma.passwordResetToken.findUnique({
+      where: { tokenHash: hashToken(token) },
+    });
+    if (!registro || registro.usedAt || registro.expiresAt.getTime() < Date.now()) {
+      throw new BadRequestException('Este link expirou ou já foi usado. Peça um novo.');
+    }
+
+    const passwordHash = await argon2.hash(novaSenha, { type: argon2.argon2id });
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: registro.userId }, data: { passwordHash } }),
+      this.prisma.passwordResetToken.update({
+        where: { id: registro.id },
+        data: { usedAt: new Date() },
+      }),
+      // derruba sessões antigas: quem tinha o token roubado perde o acesso
+      this.prisma.refreshToken.updateMany({
+        where: { userId: registro.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    this.logger.log(`Senha redefinida para o usuário ${registro.userId}; sessões anteriores revogadas.`);
+    return { ok: true, message: 'Senha redefinida. Faça login com a nova senha.' };
   }
 
   /** Troca um refresh token válido por um par novo (access + refresh).
@@ -218,4 +314,42 @@ export class AuthService {
       user: { id: user.id, email: user.email, role: user.role, organizationId: user.organizationId },
     };
   }
+}
+
+/** Corpo do e-mail de redefinição. HTML em tabela e estilo inline porque
+ *  cliente de e-mail ignora CSS externo e trata flex/grid de forma irregular. */
+function emailRedefinicaoHtml(nome: string | null, link: string, minutos: number): string {
+  const saudacao = nome ? `Olá, ${escapar(nome)}` : 'Olá';
+  return `<!doctype html>
+<html lang="pt-BR"><body style="margin:0;padding:24px;background:#f4f6f5;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e3e9e5;">
+    <tr><td style="padding:22px 26px 0;">
+      <div style="font-size:17px;font-weight:700;color:#0F8C5A;letter-spacing:-.02em;">Zaplane</div>
+    </td></tr>
+    <tr><td style="padding:14px 26px 0;">
+      <h1 style="margin:0;font-size:19px;line-height:1.3;color:#0C1F17;">Redefinir sua senha</h1>
+      <p style="margin:10px 0 0;font-size:14px;line-height:1.55;color:#3B4E45;">
+        ${saudacao}. Recebemos um pedido para redefinir a senha da sua conta no Zaplane.
+      </p>
+    </td></tr>
+    <tr><td style="padding:20px 26px 0;">
+      <a href="${link}" style="display:inline-block;background:#0F8C5A;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:600;">
+        Escolher nova senha
+      </a>
+      <p style="margin:14px 0 0;font-size:12px;line-height:1.5;color:#6C7F75;">
+        O link vale por ${minutos} minutos e só pode ser usado uma vez.
+      </p>
+    </td></tr>
+    <tr><td style="padding:18px 26px 24px;">
+      <p style="margin:0;font-size:12px;line-height:1.5;color:#6C7F75;border-top:1px solid #e3e9e5;padding-top:14px;">
+        Se não foi você que pediu, ignore este e-mail — sua senha continua a mesma.
+      </p>
+    </td></tr>
+  </table>
+</body></html>`;
+}
+
+function escapar(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 }

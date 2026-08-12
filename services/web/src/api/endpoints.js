@@ -20,6 +20,12 @@ export async function register(dto) {
 // reidratar a identidade após um F5, quando só o token sobrevive).
 export const getMe = () => api.get("/auth/me");
 
+// Recuperação de senha. O forgot responde igual exista o e-mail ou não —
+// não expõe quem tem conta.
+export const forgotPassword = (email) => api.post("/auth/forgot-password", { email });
+export const resetPassword = (token, password) =>
+  api.post("/auth/reset-password", { token, password });
+
 /* ---- Equipe ---- */
 export const listMembers = () => api.get("/members");
 
