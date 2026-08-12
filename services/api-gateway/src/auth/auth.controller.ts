@@ -19,6 +19,20 @@ export class AuthController {
     return this.auth.login(dto);
   }
 
+  /** Renova a sessão sem exigir novo login. Sem esta rota o usuário era
+   *  derrubado a cada 15 minutos (validade do access token). */
+  @Post('refresh')
+  refresh(@Body() body: { refreshToken?: string }) {
+    return this.auth.refresh(body?.refreshToken ?? '');
+  }
+
+  /** Encerra a sessão revogando o refresh token (um token roubado deixaria de
+   *  valer só quando expirasse, em 30 dias). */
+  @Post('logout')
+  logout(@Body() body: { refreshToken?: string }) {
+    return this.auth.logout(body?.refreshToken);
+  }
+
   /** Quem sou eu — o painel usa para mostrar o usuário logado de verdade. */
   @Get('me')
   @UseGuards(JwtAuthGuard)

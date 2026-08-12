@@ -1,15 +1,19 @@
 // Funções por endpoint, casadas com o contrato do gateway (docs/ARCHITECTURE.md §4).
-import { api, setToken } from "./client.js";
+import { api, setToken, setRefreshToken, getRefreshToken, clearSession } from "./client.js";
 
 /* ---- Auth ---- */
+// Guardamos o refreshToken junto do access: é ele que mantém a sessão viva
+// além dos 15 minutos do access token (o client.js renova sozinho no 401).
 export async function login(email, password) {
   const r = await api.post("/auth/login", { email, password });
   setToken(r.accessToken);
+  setRefreshToken(r.refreshToken);
   return r;
 }
 export async function register(dto) {
   const r = await api.post("/auth/register", dto); // {organizationName,name,email,password}
   setToken(r.accessToken);
+  setRefreshToken(r.refreshToken);
   return r;
 }
 // Perfil do usuário logado — usado para exibir quem está na sessão (e para
@@ -91,4 +95,11 @@ export const activateSubscription = (cpfCnpj) =>
   api.post("/billing/subscription/activate", cpfCnpj ? { cpfCnpj } : {});
 
 /* ---- Sessão ---- */
-export function logout() { setToken(null); }
+// Avisa o servidor para revogar o refresh token — sem isso, um token roubado
+// continuaria válido por 30 dias mesmo depois de o usuário sair. A limpeza
+// local acontece de qualquer jeito, mesmo se a chamada falhar.
+export function logout() {
+  const rt = getRefreshToken();
+  if (rt) api.post("/auth/logout", { refreshToken: rt }).catch(() => {});
+  clearSession();
+}

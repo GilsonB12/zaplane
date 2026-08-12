@@ -1,7 +1,8 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
+import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -11,8 +12,17 @@ function slugify(s: string): string {
     + '-' + Math.random().toString(36).slice(2, 7);
 }
 
+// Guardamos só o hash do refresh token: se o banco vazar, os tokens não são
+// reutilizáveis. SHA-256 basta aqui (o token já é aleatório e de alta entropia,
+// diferente de uma senha — não precisa de KDF lento).
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger('Auth');
+
   constructor(
     private prisma: PrismaService,
     private jwt: JwtService,
@@ -104,16 +114,99 @@ export class AuthService {
     };
   }
 
+  /** Troca um refresh token válido por um par novo (access + refresh).
+   *
+   *  O access token dura 15 minutos de propósito — curto o suficiente para
+   *  limitar o estrago de um vazamento. Sem esta rota, porém, o usuário era
+   *  jogado na tela de login a cada 15 minutos, perdendo o que estivesse
+   *  fazendo; o refresh token já era emitido no login e simplesmente jogado
+   *  fora pelo painel.
+   *
+   *  ROTAÇÃO COM DETECÇÃO DE REÚSO: cada refresh é de uso único — ao ser
+   *  usado, é revogado e um novo é emitido. Se um token já revogado for
+   *  apresentado, tratamos como indício de roubo (alguém está usando uma
+   *  cópia) e revogamos TODAS as sessões do usuário, forçando novo login. */
+  async refresh(refreshToken: string) {
+    if (!refreshToken) throw new UnauthorizedException('Sessão inválida.');
+
+    let payload: any;
+    try {
+      payload = await this.jwt.verifyAsync(refreshToken, {
+        secret: this.config.get('jwt.refreshSecret'),
+      });
+    } catch {
+      throw new UnauthorizedException('Sessão expirada. Entre novamente.');
+    }
+
+    const tokenHash = hashToken(refreshToken);
+    const stored = await this.prisma.refreshToken.findFirst({
+      where: { tokenHash, userId: payload.sub },
+    });
+
+    if (!stored) {
+      // assinatura válida mas token desconhecido: sessão antiga de antes deste
+      // recurso existir, ou banco limpo. Exige login novo, sem alarde.
+      throw new UnauthorizedException('Sessão expirada. Entre novamente.');
+    }
+
+    if (stored.revokedAt) {
+      this.logger.warn(
+        `Refresh token já revogado reapresentado (usuário ${payload.sub}) — revogando todas as sessões.`,
+      );
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: payload.sub, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw new UnauthorizedException('Sessão encerrada por segurança. Entre novamente.');
+    }
+
+    if (stored.expiresAt.getTime() < Date.now()) {
+      throw new UnauthorizedException('Sessão expirada. Entre novamente.');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!user || user.status !== 'active') throw new UnauthorizedException('Usuário inativo.');
+
+    // consome o token atual e emite o próximo
+    await this.prisma.refreshToken.update({
+      where: { id: stored.id },
+      data: { revokedAt: new Date() },
+    });
+    return this.issueTokens(user);
+  }
+
+  /** Encerra a sessão: revoga o refresh token apresentado. Sem isso, um token
+   *  roubado continuaria válido por 30 dias mesmo depois de "sair". */
+  async logout(refreshToken?: string) {
+    if (!refreshToken) return { ok: true };
+    await this.prisma.refreshToken.updateMany({
+      where: { tokenHash: hashToken(refreshToken), revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return { ok: true };
+  }
+
   private async issueTokens(user: { id: string; organizationId: string; role: string; email: string }) {
     const payload = { sub: user.id, orgId: user.organizationId, role: user.role, email: user.email };
     const accessToken = await this.jwt.signAsync(payload, {
       secret: this.config.get('jwt.accessSecret'),
       expiresIn: this.config.get<number>('jwt.accessTtl'),
     });
+    const refreshTtl = this.config.get<number>('jwt.refreshTtl') ?? 2592000;
     const refreshToken = await this.jwt.signAsync(payload, {
       secret: this.config.get('jwt.refreshSecret'),
-      expiresIn: this.config.get<number>('jwt.refreshTtl'),
+      expiresIn: refreshTtl,
     });
+
+    // persiste o hash para permitir rotação e revogação
+    await this.prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashToken(refreshToken),
+        expiresAt: new Date(Date.now() + refreshTtl * 1000),
+      },
+    });
+
     return {
       accessToken,
       refreshToken,
