@@ -44,6 +44,25 @@ export class ChannelsService {
     return { items: channels.map((c) => this.toPublic(c)) };
   }
 
+  /** Cliente confirma que cadastrou a forma de pagamento na Meta.
+   *
+   *  Não é verificação: a situação de faturamento da WABA só é legível por
+   *  Business Solution Provider. Guardamos o reconhecimento para parar de
+   *  lembrar do passo — se a Meta reclamar depois, o alerta (account_alerts)
+   *  reaparece e volta a avisar. */
+  async ackPayment(orgId: string, channelId: string, confirmado = true) {
+    const channel = await this.prisma.whatsappChannel.findFirst({
+      where: { id: channelId, organizationId: orgId },
+    });
+    if (!channel) throw new NotFoundException('Canal não encontrado.');
+
+    const updated = await this.prisma.whatsappChannel.update({
+      where: { id: channel.id },
+      data: { paymentAckAt: confirmado ? new Date() : null },
+    });
+    return this.toPublic(updated);
+  }
+
   // POST /channels/manual — pipeline a-g do spec §5.2
   async connectManual(orgId: string, dto: ConnectManualDto) {
     const version = this.config.get<string>('whatsapp.graphVersion')!;
@@ -409,6 +428,9 @@ export class ChannelsService {
     status: string;
     qualityRating: string | null;
     createdAt: Date;
+    paymentAckAt?: Date | null;
+    alertSeverity?: string | null;
+    alertMessage?: string | null;
   }) {
     return {
       id: c.id,
@@ -420,6 +442,12 @@ export class ChannelsService {
       status: c.status,
       qualityRating: c.qualityRating,
       createdAt: c.createdAt,
+      // passo de forma de pagamento na Meta: não conseguimos verificar (é
+      // restrito a Solution Provider), então o painel lembra do passo até o
+      // cliente confirmar que resolveu
+      paymentAckAt: c.paymentAckAt ?? null,
+      alertSeverity: c.alertSeverity ?? null,
+      alertMessage: c.alertMessage ?? null,
     };
   }
 }

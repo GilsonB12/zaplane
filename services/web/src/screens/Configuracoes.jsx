@@ -8,7 +8,7 @@ import { Card, PrimaryBtn, ROLE_LABEL, ROLE_DESC, ROLE_CLS, iniciaisDe } from ".
 import { useResource, useMutation } from "../hooks/useResource.js";
 import {
   listChannels, disconnectChannel, getBillingSummary, buyCredits, listMembers,
-  activateSubscription,
+  activateSubscription, ackChannelPayment,
 } from "../api/endpoints.js";
 import { formatBRL } from "../utils/money.js";
 import ConectarWhatsAppButton from "../components/ConectarWhatsAppButton.jsx";
@@ -552,6 +552,16 @@ export default function Configuracoes() {
   const canaisRes = useResource(listChannels, []);
   const canais = canaisRes.data?.items ?? [];
   const desconectar = useMutation(disconnectChannel);
+  const ackPagamento = useMutation(ackChannelPayment);
+
+  async function onConfirmarPagamento(id) {
+    try {
+      await ackPagamento.run(id, true);
+      canaisRes.reload();
+    } catch (e) {
+      setErroDesconectar(e.message || "Não foi possível salvar a confirmação.");
+    }
+  }
 
   async function onDesconectar(id) {
     if (!window.confirm(
@@ -581,6 +591,11 @@ export default function Configuracoes() {
       </button>
     </div>
   );
+
+  // Canais ativos que ainda não tiveram a forma de pagamento confirmada.
+  // Não dá para verificar isso na Meta (é restrito a Solution Provider), então
+  // o painel lembra do passo até o cliente dizer que resolveu.
+  const semPagamento = canais.filter((c) => c.status === "active" && !c.paymentAckAt);
 
   return (
     <div className="space-y-4 p-4 sm:space-y-5 sm:p-6 lg:p-7">
@@ -622,6 +637,55 @@ export default function Configuracoes() {
               {erroDesconectar}
             </div>
           )}
+
+          {/* Passo que falta depois de conectar: forma de pagamento na Meta.
+              Sem isso a Meta libera um período de cortesia e depois bloqueia os
+              envios — e o cliente costuma culpar a plataforma. */}
+          {semPagamento.map((c) => (
+            <div key={c.id} className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-500/20 dark:bg-amber-500/5">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                    Falta 1 passo: cadastrar a forma de pagamento na Meta
+                  </h3>
+                  <p className="mt-1 text-[13px] leading-snug text-amber-800 dark:text-amber-300">
+                    A Meta cobra você diretamente por mensagem entregue — isso é separado da sua
+                    assinatura do Zaplane. Sem um cartão cadastrado, os envios do número{" "}
+                    <strong>{c.displayNumber || c.label}</strong> param depois de um período inicial.
+                  </p>
+
+                  <ol className="mt-3 list-decimal space-y-1 pl-5 text-[13px] text-amber-800 dark:text-amber-300">
+                    <li>
+                      Abra o link abaixo <strong>logado na mesma conta do Facebook</strong> que você
+                      usou para conectar este número — em outra conta, a conta do WhatsApp não aparece.
+                    </li>
+                    <li>Vá em <strong>Formas de pagamento</strong> → aba <strong>Contas do WhatsApp Business</strong>.</li>
+                    <li>Selecione a conta <strong>{c.label}</strong> e clique em <strong>Adicionar forma de pagamento</strong>.</li>
+                    <li>País <strong>Brasil</strong> e moeda <strong>Real brasileiro</strong> — a moeda não pode ser alterada depois.</li>
+                  </ol>
+
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <a
+                      href="https://business.facebook.com/billing_hub/payment_methods"
+                      target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2.5 text-[13px] font-semibold text-white hover:opacity-90 sm:py-2"
+                      style={{ backgroundColor: "#0F8C5A" }}
+                    >
+                      <CreditCard className="h-3.5 w-3.5" /> Cadastrar na Meta
+                    </a>
+                    <button
+                      onClick={() => onConfirmarPagamento(c.id)}
+                      disabled={ackPagamento.pending}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-300 px-3.5 py-2.5 text-[13px] font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-60 dark:border-amber-500/30 dark:text-amber-200 dark:hover:bg-amber-500/10 sm:py-2"
+                    >
+                      {ackPagamento.pending ? "Salvando…" : "Já cadastrei"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
 
           {canaisRes.loading && (
             <div className="flex items-center justify-center py-16 text-[13px] text-zinc-400">

@@ -29,6 +29,18 @@ export class ChannelsController {
     return this.channels.esExchange(orgId, dto);
   }
 
+  /** Cliente confirma ter cadastrado a forma de pagamento na Meta — ver
+   *  ChannelsService.ackPayment (não é verificação, é reconhecimento). */
+  @Post(':id/payment-ack')
+  @Roles('owner', 'admin')
+  ackPayment(
+    @CurrentUser('organizationId') orgId: string,
+    @Param('id') id: string,
+    @Body() body: { confirmado?: boolean },
+  ) {
+    return this.channels.ackPayment(orgId, id, body?.confirmado !== false);
+  }
+
   @Delete(':id')
   @Roles('owner', 'admin')
   disconnect(@CurrentUser('organizationId') orgId: string, @Param('id') id: string) {

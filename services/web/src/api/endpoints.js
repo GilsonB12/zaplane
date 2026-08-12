@@ -73,6 +73,11 @@ export const listChannels = () => api.get("/channels");
 export const connectChannelManual = (dto) => api.post("/channels/manual", dto);
 export const esExchange = (dto) => api.post("/channels/es/exchange", dto);
 export const disconnectChannel = (id) => api.del(`/channels/${id}`);
+// Cliente confirma que cadastrou a forma de pagamento na Meta. Não é
+// verificação (a Meta não expõe isso a Tech Provider) — serve para o painel
+// parar de lembrar do passo.
+export const ackChannelPayment = (id, confirmado = true) =>
+  api.post(`/channels/${id}/payment-ack`, { confirmado });
 
 /* ---- Billing ---- */
 export const getBillingSummary = () => api.get("/billing/summary");

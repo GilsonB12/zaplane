@@ -79,6 +79,7 @@ model WhatsappChannel {
   alertType       String?   @map("alert_type")
   alertMessage    String?   @map("alert_message")
   alertAt         DateTime? @map("alert_at") @db.Timestamptz(6)
+  paymentAckAt    DateTime? @map("payment_ack_at") @db.Timestamptz(6)
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
