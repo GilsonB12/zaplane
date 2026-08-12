@@ -555,8 +555,11 @@ export default function Configuracoes() {
 
   async function onDesconectar(id) {
     if (!window.confirm(
-      "Isso desconecta o número do Zaplane, mas NÃO desfaz a configuração na Meta " +
-      "(o app continua inscrito na WABA). Deseja continuar?",
+      "Desconectar este número do Zaplane?\n\n" +
+      "• As campanhas passam a não ter canal para enviar\n" +
+      "• O histórico de campanhas e mensagens é preservado\n" +
+      "• Nada muda na Meta — a conta e o número continuam registrados lá\n" +
+      "• Você pode reconectar o mesmo número depois",
     )) return;
     setErroDesconectar(null);
     try {

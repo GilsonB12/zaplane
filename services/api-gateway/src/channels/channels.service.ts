@@ -29,9 +29,16 @@ export class ChannelsService {
   ) {}
 
   // GET /channels — campos whitelistados, nunca token/secret (spec §5.1)
+  /** Números conectados da organização.
+   *
+   *  Desconectar é um soft-delete (status='disabled') porque campanhas e
+   *  mensagens antigas referenciam o canal — a linha precisa sobreviver para
+   *  o histórico não quebrar. Mas o painel lista "Números conectados", então
+   *  um canal desconectado NÃO pode continuar aparecendo ali: ficava ocupando
+   *  a tela com um botão "Desconectar" que já não fazia nada. */
   async list(orgId: string) {
     const channels = await this.prisma.whatsappChannel.findMany({
-      where: { organizationId: orgId },
+      where: { organizationId: orgId, status: { not: 'disabled' } },
       orderBy: { createdAt: 'desc' },
     });
     return { items: channels.map((c) => this.toPublic(c)) };

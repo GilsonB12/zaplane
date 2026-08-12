@@ -146,13 +146,22 @@ export class WebhooksService {
         // evita que 3 queries independentes divirjam quando um número troca de dono
         // (disconnect é soft: a linha antiga do dono anterior continua existindo,
         // só com status 'disabled', então o findFirst tem que ser status-aware).
+        // Prefere o canal ATIVO (se o número mudou de dono, o novo dono é quem
+        // recebe). Se nenhum estiver ativo, cai no desconectado mais recente:
+        // mensagens enviadas antes da desconexão continuam recebendo entrega,
+        // leitura e cobrança. Antes esses eventos eram descartados em silêncio
+        // e a mensagem ficava presa em "enviada" para sempre, sem debitar.
         const channel = scopedChannel && pnid === scopedPhoneNumberId
           ? scopedChannel
           : pnid
-            ? await this.prisma.whatsappChannel.findFirst({
+            ? (await this.prisma.whatsappChannel.findFirst({
                 where: { phoneNumberId: pnid, status: 'active' },
                 orderBy: { createdAt: 'desc' },
-              })
+              })) ??
+              (await this.prisma.whatsappChannel.findFirst({
+                where: { phoneNumberId: pnid },
+                orderBy: { updatedAt: 'desc' },
+              }))
             : null;
         if (!channel) continue;
 
