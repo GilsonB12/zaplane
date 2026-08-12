@@ -1,7 +1,7 @@
 import React from "react";
 import {
   Users, CheckCheck, ShieldCheck, Send,
-  ChevronRight,
+  ChevronRight, AlertTriangle, Info,
 } from "lucide-react";
 import { TEAL, Card, ProgressBar } from "../components/ui.jsx";
 import { useResource } from "../hooks/useResource.js";
@@ -64,6 +64,71 @@ export default function Dashboard({ setScreen, openCampaign }) {
 
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 lg:p-7">
+      {/* Alerta ativo da Meta (pagamento pendente, qualidade, restrição).
+          É o único aviso que recebemos sobre a saúde da conta do cliente. */}
+      {canal?.alerta && (
+        <div className={`flex items-start gap-3 rounded-xl border p-4 ${
+          canal.alerta.severidade === "CRITICAL"
+            ? "border-red-200 bg-red-50 dark:border-red-500/20 dark:bg-red-500/5"
+            : "border-amber-200 bg-amber-50 dark:border-amber-500/20 dark:bg-amber-500/5"
+        }`}>
+          <AlertTriangle className={`mt-0.5 h-5 w-5 shrink-0 ${
+            canal.alerta.severidade === "CRITICAL" ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"
+          }`} />
+          <div className="min-w-0">
+            <div className={`text-sm font-semibold ${
+              canal.alerta.severidade === "CRITICAL" ? "text-red-800 dark:text-red-300" : "text-amber-800 dark:text-amber-300"
+            }`}>
+              A Meta sinalizou um problema no seu número
+            </div>
+            <p className={`mt-0.5 break-words text-[13px] ${
+              canal.alerta.severidade === "CRITICAL" ? "text-red-700 dark:text-red-300" : "text-amber-700 dark:text-amber-300"
+            }`}>
+              {canal.alerta.mensagem || "Verifique a situação da conta no WhatsApp Manager."}
+            </p>
+            <a
+              href="https://business.facebook.com/wa/manage/"
+              target="_blank" rel="noopener noreferrer"
+              className="mt-1.5 inline-block text-[13px] font-medium underline underline-offset-2"
+            >
+              Abrir o WhatsApp Manager
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* Passo pendente: forma de pagamento na Meta. Não conseguimos verificar
+          isso por API (é restrito a Solution Provider), então orientamos assim
+          que o número é conectado — sem esse cartão, a Meta trava os envios. */}
+      {canal && !canal.alerta && (
+        <details className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+          <summary className="cursor-pointer list-none text-sm font-medium text-zinc-800 dark:text-zinc-100">
+            <span className="inline-flex items-center gap-2">
+              <Info className="h-4 w-4 shrink-0 text-zinc-400" />
+              Já cadastrou a forma de pagamento na Meta?
+            </span>
+          </summary>
+          <div className="mt-3 space-y-2 text-[13px] leading-snug text-zinc-600 dark:text-zinc-300">
+            <p>
+              A Meta cobra você diretamente por mensagem entregue — separado da sua assinatura do
+              Zaplane. Sem um cartão cadastrado na sua conta do WhatsApp Business, os envios param
+              depois de um período inicial de cortesia.
+            </p>
+            <a
+              href="https://business.facebook.com/wa/manage/"
+              target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-semibold text-white hover:opacity-90"
+              style={{ backgroundColor: "#0F8C5A" }}
+            >
+              Cadastrar na Meta
+            </a>
+            <p className="text-[12px] text-zinc-400">
+              Configurações de pagamento → Adicionar forma de pagamento (Brasil, BRL).
+            </p>
+          </div>
+        </details>
+      )}
+
       {/* KPIs */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         {kpis.map((k) => {

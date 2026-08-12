@@ -6,7 +6,10 @@ import {
 } from "lucide-react";
 import { Card, PrimaryBtn, ROLE_LABEL, ROLE_DESC, ROLE_CLS, iniciaisDe } from "../components/ui.jsx";
 import { useResource, useMutation } from "../hooks/useResource.js";
-import { listChannels, disconnectChannel, getBillingSummary, buyCredits, listMembers } from "../api/endpoints.js";
+import {
+  listChannels, disconnectChannel, getBillingSummary, buyCredits, listMembers,
+  activateSubscription,
+} from "../api/endpoints.js";
 import { formatBRL } from "../utils/money.js";
 import ConectarWhatsAppButton from "../components/ConectarWhatsAppButton.jsx";
 import ConectarManualModal from "../components/ConectarManualModal.jsx";
@@ -49,15 +52,40 @@ const VALORES_COMPRA = [2000, 5000, 10000]; // R$ 20 / 50 / 100 em centavos
 function AbaBilling() {
   const billingRes = useResource(getBillingSummary, []);
   const comprar = useMutation(buyCredits);
+  const assinar = useMutation(activateSubscription);
   const [seletorAberto, setSeletorAberto] = useState(false);
   const [mensagemCompra, setMensagemCompra] = useState(null);
-  const [notaAtivar, setNotaAtivar] = useState(false);
+  const [mensagemAssinatura, setMensagemAssinatura] = useState(null);
   const [cpfInput, setCpfInput] = useState("");
 
   // pré-preenche o CPF/CNPJ já salvo na organização (billing.summary.cpfCnpj)
   useEffect(() => {
     if (billingRes.data?.cpfCnpj) setCpfInput(billingRes.data.cpfCnpj);
   }, [billingRes.data?.cpfCnpj]);
+
+  // Ativa a assinatura de verdade: cria cliente + assinatura no Asaas e devolve
+  // o link da 1ª cobrança. A assinatura só fica ativa quando o pagamento
+  // confirma (webhook) — por isso o texto fala em "após a confirmação".
+  async function onAssinar() {
+    setMensagemAssinatura(null);
+    try {
+      const res = await assinar.run(cpfInput.trim() || undefined);
+      if (res?.paymentUrl) window.open(res.paymentUrl, "_blank", "noopener,noreferrer");
+      setMensagemAssinatura({
+        tipo: "sucesso",
+        texto: res?.paymentUrl
+          ? "Cobrança gerada. Pague pelo link (Pix, boleto ou cartão) — a assinatura é ativada automaticamente após a confirmação."
+          : "Assinatura registrada. Acompanhe a cobrança no extrato abaixo.",
+        paymentUrl: res?.paymentUrl ?? null,
+      });
+      billingRes.reload();
+    } catch (e) {
+      setMensagemAssinatura({
+        tipo: "erro",
+        texto: e.body?.message || e.message || "Não foi possível gerar a cobrança da assinatura.",
+      });
+    }
+  }
 
   async function onComprar(valorCents) {
     setMensagemCompra(null);
@@ -116,7 +144,10 @@ function AbaBilling() {
   const pagamentos = billingRes.data?.recentPayments ?? [];
   const status = sub?.status ?? "inactive";
   const st = STATUS_ASSINATURA[status] ?? STATUS_ASSINATURA.inactive;
-  const precoCents = sub?.priceCents ?? 13500;
+  const precoCents = sub?.priceCents ?? 14900;
+  // cobrança de assinatura já emitida e ainda não paga — evita gerar outra
+  const cobrancaAssinaturaPendente = (billingRes.data?.pendingPayments ?? [])
+    .find((p) => p.kind === "subscription" && p.paymentUrl) ?? null;
 
   // Derivações compartilhadas pelas duas visões do extrato (cards no mobile / tabela no desktop)
   const linhasPagamento = pagamentos.map((p) => ({
@@ -165,16 +196,61 @@ function AbaBilling() {
         )}
 
         {status !== "active" && (
-          <div className="mt-5">
-            <PrimaryBtn className="w-full sm:w-auto" onClick={() => setNotaAtivar(true)}>
-              <CreditCard className="h-4 w-4" /> Ativar assinatura
-            </PrimaryBtn>
-            {notaAtivar && (
-              <p className="mt-2.5 inline-flex items-start gap-1.5 text-[12px] text-zinc-500 dark:text-zinc-400">
-                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                Pagamento online (Pix/boleto via Asaas) chega em breve nesta tela. Por enquanto, fale
-                com o suporte Zaplane para ativar sua assinatura manualmente.
-              </p>
+          <div className="mt-5 flex flex-col gap-3">
+            {/* CPF/CNPJ é exigido pelo Asaas para emitir a cobrança */}
+            <div>
+              <label className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                CPF/CNPJ do responsável pela cobrança
+              </label>
+              <input
+                value={cpfInput}
+                onChange={(e) => setCpfInput(e.target.value)}
+                inputMode="numeric"
+                placeholder="Somente números"
+                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-base outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 sm:max-w-xs sm:py-2 sm:text-sm"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <PrimaryBtn className="w-full sm:w-auto" onClick={onAssinar} disabled={assinar.pending}>
+                <CreditCard className="h-4 w-4" />
+                {assinar.pending ? "Gerando cobrança…" : `Assinar por ${formatBRL(precoCents)}/mês`}
+              </PrimaryBtn>
+
+              {/* se já existe cobrança em aberto, o caminho é pagar essa */}
+              {cobrancaAssinaturaPendente?.paymentUrl && (
+                <a
+                  href={cobrancaAssinaturaPendente.paymentUrl}
+                  target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-zinc-200 px-3.5 py-2.5 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:py-2"
+                >
+                  Abrir cobrança em aberto
+                </a>
+              )}
+            </div>
+
+            <p className="inline-flex items-start gap-1.5 text-[12px] text-zinc-500 dark:text-zinc-400">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              Pague por Pix, boleto ou cartão. A assinatura é ativada sozinha assim que o pagamento
+              é confirmado — o Pix costuma cair em minutos.
+            </p>
+
+            {mensagemAssinatura && (
+              <div className={`text-[12px] ${mensagemAssinatura.tipo === "erro" ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300"}`}>
+                <p className="inline-flex items-start gap-1.5">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {mensagemAssinatura.texto}
+                </p>
+                {mensagemAssinatura.paymentUrl && (
+                  <a
+                    href={mensagemAssinatura.paymentUrl}
+                    target="_blank" rel="noopener noreferrer"
+                    className="mt-2 inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-white hover:opacity-90"
+                    style={{ backgroundColor: "#0F8C5A" }}
+                  >
+                    <CreditCard className="h-3.5 w-3.5" /> Abrir cobrança para pagar
+                  </a>
+                )}
+              </div>
             )}
           </div>
         )}

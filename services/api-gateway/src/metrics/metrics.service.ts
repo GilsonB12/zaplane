@@ -56,6 +56,7 @@ export class MetricsService {
         select: {
           label: true, displayNumber: true, qualityRating: true,
           throughputLimit: true, status: true, connectedVia: true,
+          alertSeverity: true, alertType: true, alertMessage: true, alertAt: true,
         },
       }),
     ]);
@@ -82,6 +83,15 @@ export class MetricsService {
             throughputLimit: canal.throughputLimit ?? null,
             status: canal.status,
             connectedVia: canal.connectedVia || null,
+            // alerta ativo da Meta (pagamento pendente, qualidade, restrição)
+            alerta: canal.alertSeverity
+              ? {
+                  severidade: canal.alertSeverity,
+                  tipo: canal.alertType,
+                  mensagem: canal.alertMessage,
+                  quando: canal.alertAt,
+                }
+              : null,
           }
         : null,
     };

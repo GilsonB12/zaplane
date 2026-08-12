@@ -144,6 +144,41 @@ export class BillingService {
     return this.config.get<number>('billing.usagePriceCents') ?? 43;
   }
 
+  /** Taxa Zaplane por mensagem para uma categoria da Meta ('MARKETING',
+   *  'UTILITY', 'AUTHENTICATION'). Utility custa muito menos na Meta, então
+   *  cobrar o mesmo que marketing seria indefensável. */
+  usagePriceForCategory(category?: string | null): number {
+    const byCategory = this.config.get<Record<string, number>>('billing.usagePriceByCategory') ?? {};
+    return byCategory[(category ?? '').toLowerCase()] ?? this.usagePriceCents;
+  }
+
+  /** Estimativa da taxa Zaplane para um disparo, já descontando a cota de
+   *  marketing inclusa na assinatura.
+   *
+   *  Sem isso, uma organização recém-assinada (carteira zerada) era bloqueada
+   *  pela pré-checagem de saldo mesmo tendo mensagens de marketing inclusas —
+   *  a cota existia no débito mas não na estimativa. */
+  async estimatePlatformFee(
+    orgId: string,
+    category: string | null | undefined,
+    recipients: number,
+  ): Promise<{ totalCents: number; cobraveis: number; cotaUsada: number; unitCents: number }> {
+    const unitCents = this.usagePriceForCategory(category);
+    const isMarketing = (category ?? '').toUpperCase() === 'MARKETING';
+
+    let cotaUsada = 0;
+    if (isMarketing && recipients > 0) {
+      const sub = await this.prisma.subscription.findUnique({
+        where: { organizationId: orgId },
+        select: { freeMarketingRemaining: true },
+      });
+      cotaUsada = Math.min(sub?.freeMarketingRemaining ?? 0, recipients);
+    }
+
+    const cobraveis = Math.max(recipients - cotaUsada, 0);
+    return { totalCents: cobraveis * unitCents, cobraveis, cotaUsada, unitCents };
+  }
+
   get subscriptionPriceCents(): number {
     return this.config.get<number>('billing.subscriptionPriceCents') ?? 13500;
   }

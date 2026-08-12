@@ -54,12 +54,16 @@ export class CampaignsService {
     // números de origens distintas, ver spec §5 (B2).
     // arredonda p/ centavo inteiro (tarifas têm fração de centavo; BigInt exige inteiro)
     const costEstimate = BigInt(Math.round(eligible.length * (RATE_CENTS[template.category] ?? 0)));
-    const platformFeeEstimate = BigInt(eligible.length * this.billing.usagePriceCents);
+    // taxa Zaplane por CATEGORIA, já descontando a cota de marketing inclusa
+    // na assinatura (sem isso, org recém-assinada com carteira zerada era
+    // bloqueada mesmo tendo mensagens inclusas)
+    const fee = await this.billing.estimatePlatformFee(orgId, template.category, eligible.length);
+    const platformFeeEstimate = BigInt(fee.totalCents);
 
     // 4) pré-checagem de saldo: bloqueia ANTES de criar a campanha/enfileirar
     // se a carteira não cobre o teto estimado (débito real ocorre só quando
     // a Meta confirma billable=true, via webhook).
-    await this.billing.assertBalanceFor(orgId, Number(platformFeeEstimate));
+    await this.billing.assertBalanceFor(orgId, fee.totalCents);
 
     // 5) cria a campanha
     const campaign = await this.prisma.campaign.create({
@@ -99,6 +103,9 @@ export class CampaignsService {
       suppressed,
       costEstimateCents: Number(costEstimate),
       platformFeeEstimateCents: Number(platformFeeEstimate),
+      // transparência: quantas saíram pela cota inclusa e quantas serão cobradas
+      cotaInclusaUsada: fee.cotaUsada,
+      cobraveis: fee.cobraveis,
       status: dto.scheduledAt ? 'scheduled' : 'sending',
     };
   }

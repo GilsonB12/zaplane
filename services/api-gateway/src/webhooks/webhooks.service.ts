@@ -124,6 +124,15 @@ export class WebhooksService {
         const value = change.value ?? {};
         const pnid = value?.metadata?.phone_number_id;
 
+        // Alertas de conta da Meta (pagamento pendente, qualidade, restrição…).
+        // Chegam SEM metadata.phone_number_id — o dono é a WABA em entry.id.
+        // Precisam ser tratados antes da resolução por número, senão caem no
+        // `continue` abaixo e somem (era o que acontecia).
+        if (change.field === 'account_alerts') {
+          await this.handleAccountAlert(entry.id, value, scopedPhoneNumberId);
+          continue;
+        }
+
         // defense-in-depth: payload autenticado com secret de canal só pode afetar
         // aquele canal — descarta changes com phone_number_id diferente do autenticado.
         if (scopedPhoneNumberId && pnid !== scopedPhoneNumberId) {
@@ -151,6 +160,49 @@ export class WebhooksService {
         for (const message of value.messages ?? []) await this.handleInbound(message, value, channel);
       }
     }
+  }
+
+  /** Alerta de conta da Meta (`account_alerts`) — pagamento pendente, queda de
+   *  qualidade, restrição da conta. É o ÚNICO aviso que um Tech Provider
+   *  recebe sobre a saúde da conta do cliente: os campos de faturamento da
+   *  WABA são exclusivos de Business Solution Provider.
+   *
+   *  Guardamos o alerta ativo no canal para o painel exibir; quando a Meta
+   *  informa que foi resolvido, limpamos. */
+  private async handleAccountAlert(wabaId: string, value: any, scopedPhoneNumberId: string | null) {
+    if (!wabaId) return;
+
+    const canais = await this.prisma.whatsappChannel.findMany({
+      where: { wabaId, status: 'active' },
+      select: { id: true, phoneNumberId: true },
+    });
+    if (canais.length === 0) return;
+
+    // se o payload veio autenticado pelo secret de um canal específico, o
+    // alerta só pode afetar aquele canal (mesma defesa do fluxo de status)
+    const alvos = scopedPhoneNumberId
+      ? canais.filter((c) => c.phoneNumberId === scopedPhoneNumberId)
+      : canais;
+    if (alvos.length === 0) return;
+
+    const resolvido = String(value?.alert_status ?? '').toUpperCase() === 'RESOLVED';
+    const data = resolvido
+      ? { alertSeverity: null, alertType: null, alertMessage: null, alertAt: null }
+      : {
+          alertSeverity: value?.alert_severity ?? 'WARNING',
+          alertType: value?.alert_type ?? null,
+          alertMessage: value?.alert_description ?? value?.alert_message ?? null,
+          alertAt: new Date(),
+        };
+
+    await this.prisma.whatsappChannel.updateMany({
+      where: { id: { in: alvos.map((c) => c.id) } },
+      data,
+    });
+    // não logamos a descrição (pode conter dado do cliente), só o tipo
+    this.logger.warn(
+      `Alerta da Meta ${resolvido ? 'RESOLVIDO' : 'ATIVO'} para WABA ${wabaId} (tipo: ${value?.alert_type ?? 'n/d'}).`,
+    );
   }
 
   private async handleStatus(status: any, channelId: string, organizationId: string) {

@@ -46,9 +46,12 @@ export class MessagesService {
     };
 
     // pré-checagem de saldo: bloqueia ANTES de enfileirar se a carteira não
-    // cobre o preço fixo por mensagem (débito real só ocorre via webhook,
-    // quando a Meta confirma billable=true).
-    await this.billing.assertBalanceFor(orgId, this.billing.usagePriceCents);
+    // cobre a taxa desta CATEGORIA (débito real só ocorre via webhook, quando
+    // a Meta confirma billable=true). A cota de marketing inclusa na
+    // assinatura é considerada — sem isso, uma organização recém-assinada com
+    // carteira zerada não conseguiria usar as mensagens que já pagou.
+    const fee = await this.billing.estimatePlatformFee(orgId, template.category, 1);
+    await this.billing.assertBalanceFor(orgId, fee.totalCents);
 
     const msg = await this.prisma.outboundMessage.create({
       data: {
@@ -88,10 +91,12 @@ export class MessagesService {
       text: { body: dto.text, preview_url: false },
     };
 
-    // pré-checagem de saldo: bloqueia ANTES de enfileirar se a carteira não
-    // cobre o preço fixo por mensagem (débito real só ocorre via webhook,
-    // quando a Meta confirma billable=true).
-    await this.billing.assertBalanceFor(orgId, this.billing.usagePriceCents);
+    // Texto livre só é entregue dentro da janela de 24h — e a Meta NÃO tarifa
+    // mensagem de serviço nessa janela (billable=false), então não há taxa
+    // Zaplane a cobrar. Exigir saldo aqui bloqueava atendimento de quem tinha
+    // carteira zerada, cobrando por algo que é gratuito dos dois lados.
+    // (Se algum dia a Meta voltar a tarifar, o débito real continua vindo do
+    // webhook, que é a fonte de verdade.)
 
     const msg = await this.prisma.outboundMessage.create({
       data: {
