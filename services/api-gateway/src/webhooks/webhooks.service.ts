@@ -11,6 +11,12 @@ const OPT_OUT_KEYWORDS = ['parar', 'sair', 'stop', 'cancelar', 'descadastrar', '
 // cada evento) — TTL 5 min, invalidação perfeita não é requisito (o TTL cobre
 // rotação/edição do secret e troca de dono do número).
 const CHANNEL_SECRET_TTL_MS = 5 * 60 * 1000;
+// Cache NEGATIVO: phone_number_id que não resolve para canal nenhum. Sem ele,
+// cada id inexistente vira uma consulta ao Postgres a cada requisição — e como
+// a rota é pública, basta variar o id no corpo para gerar consulta ilimitada.
+// TTL curto para um canal recém-conectado não ficar invisível.
+const CHANNEL_MISS_TTL_MS = 30 * 1000;
+const CHANNEL_MISS_MAX = 10_000;
 
 export interface ScopedChannel {
   id: string;
@@ -24,6 +30,8 @@ export class WebhooksService {
     string,
     { secret: string; channel: ScopedChannel; expiresAt: number }
   >();
+  /** phone_number_id que não resolve para canal → epoch ms até quando vale o "não achei" */
+  private readonly missCache = new Map<string, number>();
 
   constructor(private prisma: PrismaService, private config: ConfigService) {}
 
@@ -88,11 +96,21 @@ export class WebhooksService {
       return { secret: cached.secret, channel: cached.channel };
     }
 
+    const miss = this.missCache.get(phoneNumberId);
+    if (miss && miss > Date.now()) return null;
+
     const channel = await this.prisma.whatsappChannel.findFirst({
       where: { phoneNumberId, appSecretEnc: { not: null }, status: 'active' },
       orderBy: { createdAt: 'desc' },
     });
-    if (!channel?.appSecretEnc) return null;
+    if (!channel?.appSecretEnc) {
+      // id forjado ou canal ainda sem app_secret: não repetir a consulta a cada
+      // requisição. O cap evita que ids forjados façam o Map crescer sem fim.
+      if (this.missCache.size >= CHANNEL_MISS_MAX) this.missCache.clear();
+      this.missCache.set(phoneNumberId, Date.now() + CHANNEL_MISS_TTL_MS);
+      return null;
+    }
+    this.missCache.delete(phoneNumberId);
 
     // app_secret_enc pode estar cifrado (AES-GCM) ou em texto puro (cifragem é TODO no projeto)
     let secret: string;

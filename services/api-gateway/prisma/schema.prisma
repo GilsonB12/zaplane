@@ -92,6 +92,10 @@ model WhatsappChannel {
   alertMessage    String?   @map("alert_message")
   alertAt         DateTime? @map("alert_at") @db.Timestamptz(6)
   paymentAckAt    DateTime? @map("payment_ack_at") @db.Timestamptz(6)
+  // pausa automática do dispatcher (migração 012) — enquanto > now(), o worker
+  // não reserva mensagens deste canal
+  pausedUntil     DateTime? @map("paused_until") @db.Timestamptz(6)
+  pausedReason    String?   @map("paused_reason")
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 

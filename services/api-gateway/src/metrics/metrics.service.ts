@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+/** Pausa do canal ainda em vigor? (paused_until no futuro) */
+const ativa = (ate: Date | null | undefined): boolean => !!ate && ate > new Date();
+
 /** Métricas agregadas do Dashboard.
  *
  *  Substituem os três KPIs que o painel exibia como "—" com selo "em breve".
@@ -57,6 +60,7 @@ export class MetricsService {
           label: true, displayNumber: true, qualityRating: true,
           throughputLimit: true, status: true, connectedVia: true,
           alertSeverity: true, alertType: true, alertMessage: true, alertAt: true,
+          pausedUntil: true, pausedReason: true,
         },
       }),
     ]);
@@ -83,15 +87,22 @@ export class MetricsService {
             throughputLimit: canal.throughputLimit ?? null,
             status: canal.status,
             connectedVia: canal.connectedVia || null,
-            // alerta ativo da Meta (pagamento pendente, qualidade, restrição)
-            alerta: canal.alertSeverity
-              ? {
-                  severidade: canal.alertSeverity,
-                  tipo: canal.alertType,
-                  mensagem: canal.alertMessage,
-                  quando: canal.alertAt,
-                }
-              : null,
+            // alerta ativo da Meta (pagamento pendente, qualidade, restrição).
+            // O alerta que o dispatcher grava ao pausar é sintético e some
+            // junto com a pausa — a Meta nunca mandaria o RESOLVED dele.
+            alerta:
+              canal.alertSeverity &&
+              !(canal.alertType === 'dispatcher_pause' && !ativa(canal.pausedUntil))
+                ? {
+                    severidade: canal.alertSeverity,
+                    tipo: canal.alertType,
+                    mensagem: canal.alertMessage,
+                    quando: canal.alertAt,
+                  }
+                : null,
+            // pausa automática do dispatcher — explica campanha parada sem erro
+            pausadoAte: ativa(canal.pausedUntil) ? canal.pausedUntil : null,
+            pausadoMotivo: ativa(canal.pausedUntil) ? canal.pausedReason || null : null,
           }
         : null,
     };

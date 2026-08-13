@@ -1,4 +1,5 @@
 import { Body, Controller, Headers, HttpCode, Inject, Post, UnauthorizedException } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { BillingService } from './billing.service';
 import { PAYMENT_PROVIDER, PaymentProviderAdapter } from './providers/payment-provider.interface';
 
@@ -6,6 +7,11 @@ import { PAYMENT_PROVIDER, PaymentProviderAdapter } from './providers/payment-pr
 // Meta (webhooks/whatsapp.controller.ts). A autenticidade vem do header
 // `asaas-access-token` (comparação em tempo constante), não de assinatura
 // de corpo cru — o Asaas não assina o payload como a Meta faz.
+//
+// @SkipThrottle: um 429 aqui é pagamento confirmado no Asaas que o Zaplane
+// nunca fica sabendo — assinatura presa em "Pendente" para sempre. Já
+// aconteceu uma vez por webhook ausente; não pode voltar por rate limit.
+@SkipThrottle()
 @Controller('webhooks/billing')
 export class BillingWebhookController {
   constructor(

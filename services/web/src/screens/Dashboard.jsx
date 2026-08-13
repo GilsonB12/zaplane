@@ -97,6 +97,25 @@ export default function Dashboard({ setScreen, openCampaign }) {
         </div>
       )}
 
+      {/* Pausa automática do disparo. Aparece quando a Meta recusou os envios
+          por limite de vazão — caso em que não há alerta dela, e sem este aviso
+          a campanha simplesmente parava sem explicação nenhuma. */}
+      {canal?.pausadoAte && !canal?.alerta && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/20 dark:bg-amber-500/5">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+              Envios pausados temporariamente
+            </div>
+            <p className="mt-0.5 break-words text-[13px] text-amber-700 dark:text-amber-300">
+              A Meta limitou o volume deste número. O disparo recomeça sozinho às{" "}
+              {new Date(canal.pausadoAte).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+              {" "}— nenhuma mensagem foi perdida, elas seguem na fila.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Passo pendente: forma de pagamento na Meta. Não conseguimos verificar
           isso por API (é restrito a Solution Provider), então orientamos assim
           que o número é conectado — sem esse cartão, a Meta trava os envios. */}

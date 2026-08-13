@@ -743,6 +743,19 @@ export default function Configuracoes() {
                             Qualidade: {qual.label}
                           </span>
                         )}
+                        {/* Pausa automática: a Meta recusou os envios deste número
+                            (limite de vazão ou problema de credencial/conta) e o
+                            disparo fica suspenso até o horário abaixo. Sem isso o
+                            cliente via a campanha parada sem nenhuma explicação. */}
+                        {c.pausedUntil && (
+                          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200 dark:text-amber-300 dark:ring-amber-500/30">
+                            Envios pausados até{" "}
+                            {new Date(c.pausedUntil).toLocaleTimeString("pt-BR", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                        )}
                       </div>
 
                       <div className="grid grid-cols-2 gap-2 text-[11px] text-zinc-400">

@@ -1,7 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { JwtModule } from '@nestjs/jwt';
 import { APP_GUARD } from '@nestjs/core';
+
+import { TenantThrottlerGuard } from './common/guards/tenant-throttler.guard';
+import { JanelaFixaStorage } from './common/throttler/janela-fixa.storage';
 
 import configuration from './config/configuration';
 import { PrismaModule } from './prisma/prisma.module';
@@ -23,8 +27,26 @@ import { MailModule } from './common/mail/mail.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
-    // rate limiting global: 120 req / 60s por IP (ajuste por rota se preciso)
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    // Rate limit por usuário autenticado (ver TenantThrottlerGuard), não por
+    // processo: um cliente não consegue mais consumir a cota dos outros. Os
+    // webhooks são isentos via @SkipThrottle nos respectivos controllers, e as
+    // rotas de autenticação apertam o limite via @Throttle.
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          name: 'default',
+          ttl: 60_000,
+          limit: parseInt(process.env.RATE_LIMIT_PER_MIN || '300', 10),
+        },
+      ],
+      // storage próprio: o padrão do pacote compartilha uma lista de timers
+      // entre TODOS os baldes de um mesmo throttler, então um cliente
+      // bloqueado congelava o contador dos outros (429 em quem não abusou).
+      storage: new JanelaFixaStorage(),
+    }),
+    // usado pelo TenantThrottlerGuard para verificar o access token antes de
+    // usá-lo como chave do balde (segredo é passado no verify, por chamada)
+    JwtModule.register({}),
     PrismaModule,
     MailModule,
     AuthModule,
@@ -41,6 +63,6 @@ import { MailModule } from './common/mail/mail.module';
     MembersModule,
     MetricsModule,
   ],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [{ provide: APP_GUARD, useClass: TenantThrottlerGuard }],
 })
 export class AppModule {}

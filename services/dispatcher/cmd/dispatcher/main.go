@@ -28,6 +28,13 @@ func main() {
 	}
 	defer st.Close()
 
+	// Falha rápido se a migração não foi aplicada. Sem isto o worker ficaria
+	// vivo, com healthcheck verde, logando erro de coluna a cada 750ms e sem
+	// entregar UMA mensagem sequer — a pior forma de falhar.
+	if err := st.VerificarSchema(ctx); err != nil {
+		log.Fatalf("não é seguro subir: %v", err)
+	}
+
 	wa := whatsapp.NewClient(cfg.GraphVersion)
 	w := worker.New(cfg, st, wa)
 

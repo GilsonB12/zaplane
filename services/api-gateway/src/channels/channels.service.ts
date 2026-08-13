@@ -398,6 +398,11 @@ export class ChannelsService {
       appSecretEnc: params.appSecret ? encrypt(params.appSecret) : null,
       connectedVia: params.connectedVia,
       status: 'active',
+      // Reconectar é a ação do cliente para resolver justamente o que causou a
+      // pausa (token expirado, cartão regularizado). Manter a pausa aqui faria
+      // ele reconectar com sucesso e continuar sem enviar nada por 30 minutos.
+      pausedUntil: null,
+      pausedReason: null,
     };
     // upsert atômico — evita corrida entre a leitura (find) e a escrita (create/update)
     // quando duas requisições reconectam o mesmo phoneNumberId ao mesmo tempo.
@@ -405,6 +410,14 @@ export class ChannelsService {
       where: { organizationId_phoneNumberId: { organizationId: orgId, phoneNumberId: params.phoneNumberId } },
       create: { organizationId: orgId, ...data },
       update: data,
+    });
+
+    // Limpa o alerta que o dispatcher gravou ao pausar o canal. Só esse: o
+    // alerta vindo da Meta (account_alerts) tem outro alert_type e continua
+    // valendo até ela mandar o RESOLVED.
+    await this.prisma.whatsappChannel.updateMany({
+      where: { id: channel.id, alertType: 'dispatcher_pause' },
+      data: { alertSeverity: null, alertType: null, alertMessage: null, alertAt: null },
     });
 
     // desabilita o canal placeholder de bootstrap (LOCAL_DEV) do org quando um canal
@@ -430,8 +443,17 @@ export class ChannelsService {
     createdAt: Date;
     paymentAckAt?: Date | null;
     alertSeverity?: string | null;
+    alertType?: string | null;
     alertMessage?: string | null;
+    pausedUntil?: Date | null;
+    pausedReason?: string | null;
   }) {
+    const pausado = !!c.pausedUntil && c.pausedUntil > new Date();
+    // O alerta gravado pelo dispatcher ao pausar o canal é sintético: a Meta
+    // não sabe dele e nunca vai mandar o RESOLVED que limparia os campos
+    // alert_*. Vencida a pausa, ele não pode continuar aparecendo como
+    // CRITICAL no painel.
+    const alertaSinteticoVencido = c.alertType === 'dispatcher_pause' && !pausado;
     return {
       id: c.id,
       label: c.label,
@@ -446,8 +468,13 @@ export class ChannelsService {
       // restrito a Solution Provider), então o painel lembra do passo até o
       // cliente confirmar que resolveu
       paymentAckAt: c.paymentAckAt ?? null,
-      alertSeverity: c.alertSeverity ?? null,
-      alertMessage: c.alertMessage ?? null,
+      alertSeverity: alertaSinteticoVencido ? null : c.alertSeverity ?? null,
+      alertMessage: alertaSinteticoVencido ? null : c.alertMessage ?? null,
+      // Pausa automática do dispatcher (migração 012): a Meta recusou os envios
+      // deste canal por limite de vazão ou por problema de credencial/conta.
+      // Sem expor isto, o cliente via a campanha parada em 40% sem explicação.
+      pausedUntil: pausado ? c.pausedUntil : null,
+      pausedReason: pausado ? c.pausedReason ?? null : null,
     };
   }
 }
