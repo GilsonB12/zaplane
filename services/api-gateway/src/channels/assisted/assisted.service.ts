@@ -2,6 +2,7 @@ import {
   BadRequestException, ConflictException, Injectable, Logger, NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { randomInt } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { encrypt, phoneHash } from '../../common/crypto.util';
@@ -101,26 +102,42 @@ export class AssistedService {
       this.logger.warn(`Tentativa de conectar número de outra organização (org ${orgId})`);
       throw new BadRequestException(ERROS_CONEXAO.numero_indisponivel);
     }
+    // Trava irreversível: não conseguir verificar a capacidade (token expirado,
+    // 5xx, rede) é motivo para NÃO prosseguir — seguir otimista queimaria uma
+    // vaga que não volta.
     const capacidade = await this.meta.contarNumeros(cfg.wabaId);
-    if (capacidade.ok && capacidade.total >= cfg.phoneCap) {
+    if (!capacidade.ok || capacidade.total >= cfg.phoneCap) {
       throw new ConflictException(ERROS_CONEXAO.capacidade);
     }
 
     // Linha ANTES da Meta: se a chamada aceitar e o nosso UPDATE falhar, a
     // reconciliação encontra o número; sem a linha ele seria invisível.
-    const req = await this.prisma.channelConnectionRequest.create({
-      data: {
-        organizationId: orgId,
-        createdBy: userId,
-        wabaId: cfg.wabaId,
-        phoneE164Enc: encrypt(tel.e164),
-        phoneHash: hash,
-        phoneDdd: tel.nacional.slice(0, 2),
-        phoneLast4: tel.ultimos4,
-        displayName: nome,
-        status: 'criando',
-      },
-    });
+    let req;
+    try {
+      req = await this.prisma.channelConnectionRequest.create({
+        data: {
+          organizationId: orgId,
+          createdBy: userId,
+          wabaId: cfg.wabaId,
+          phoneE164Enc: encrypt(tel.e164),
+          phoneHash: hash,
+          phoneDdd: tel.nacional.slice(0, 2),
+          phoneLast4: tel.ultimos4,
+          displayName: nome,
+          status: 'criando',
+        },
+      });
+    } catch (e) {
+      // Corrida entre a leitura (travas acima) e a escrita: quem segura de
+      // verdade são os índices únicos parciais do banco (idx_ccr_org_viva por
+      // org; idx_ccr_phone_viva GLOBAL, entre orgs). Um P2002 cru viraria 500
+      // — e no caso do índice global, um 500 em vez do 400 genérico é fresta
+      // no oráculo de enumeração que ERROS_CONEXAO tenta fechar.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException(ERROS_CONEXAO.numero_indisponivel);
+      }
+      throw e;
+    }
 
     const add = await this.meta.adicionarNumero(cfg.wabaId, tel, nome);
     if (!add.ok) {
@@ -132,7 +149,13 @@ export class AssistedService {
       throw new BadRequestException(mensagemParaCliente(add.codigo));
     }
 
-    await this.meta.inscreverWebhook(cfg.wabaId); // idempotente; sem isso nenhum status volta
+    const webhook = await this.meta.inscreverWebhook(cfg.wabaId);
+    if (!webhook.ok) {
+      // Idempotente por WABA — na prática já estará inscrito na maioria dos
+      // casos, mas no primeiro número de uma WABA nova o silêncio custa caro:
+      // sem isso nenhum status de mensagem volta. Não aborta o fluxo, só avisa alto.
+      this.logger.error(`inscreverWebhook falhou (waba ${cfg.wabaId}): ${webhook.codigo} ${webhook.detalhe}`);
+    }
     const sms = await this.meta.pedirCodigo(add.phoneNumberId, 'SMS');
     if (!sms.ok) {
       await this.prisma.channelConnectionRequest.update({
@@ -156,6 +179,10 @@ export class AssistedService {
 
   async reenviar(orgId: string, id: string, metodo: 'SMS' | 'VOICE') {
     const req = await this.buscarViva(orgId, id);
+    // 'criando' está em VIVOS mas ainda não tem phoneNumberId (só ganha os
+    // dois juntos, no fim de iniciar()) — sem essa trava, uma corrida com um
+    // iniciar() em andamento chamaria a Meta com "null" na URL.
+    if (!req.phoneNumberId) throw new BadRequestException(ERROS_CONEXAO.generico);
     if (req.codeRequests >= MAX_SMS_24H) throw new BadRequestException(ERROS_CONEXAO.sms_limite);
     if (this.segundosParaReenvio(req.lastCodeSentAt) > 0) {
       throw new BadRequestException(ERROS_CONEXAO.sms_limite);
@@ -171,6 +198,10 @@ export class AssistedService {
 
   async verificar(orgId: string, id: string, codigo: string) {
     const req = await this.buscarViva(orgId, id);
+    // Mesma trava de reenviar(): sem phoneNumberId a chamada iria pra Meta
+    // com "null" na URL, tomaria 400, e isso seria contado como código
+    // errado — queimando uma das 5 tentativas do cliente por um erro nosso.
+    if (!req.phoneNumberId) throw new BadRequestException(ERROS_CONEXAO.generico);
     const v = await this.meta.verificarCodigo(req.phoneNumberId!, codigo);
     if (!v.ok) {
       const tentativas = req.codeAttempts + 1;
@@ -188,6 +219,14 @@ export class AssistedService {
     }
 
     const pin = String(randomInt(100000, 999999));
+    // PIN gravado ANTES do registrar: é a segunda escrita irreversível (a
+    // primeira é a linha em si). Se o create do canal falhar logo depois, o
+    // PIN para re-registrar/desregistrar o número não pode ficar só na
+    // memória do processo — a coluna existe exatamente para isso.
+    await this.prisma.channelConnectionRequest.update({
+      where: { id: req.id },
+      data: { registerPinEnc: encrypt(pin) },
+    });
     const reg = await this.meta.registrar(req.phoneNumberId!, pin);
     if (!reg.ok) {
       await this.prisma.channelConnectionRequest.update({
@@ -210,7 +249,7 @@ export class AssistedService {
         registerPinEnc: encrypt(pin),
         connectedVia: 'assisted',
         status: 'active',
-      } as any,
+      },
     });
     await this.prisma.channelConnectionRequest.update({
       where: { id: req.id },
