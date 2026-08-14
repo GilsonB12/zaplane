@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AssistedService } from './assisted.service';
+import { phoneHash } from '../../common/crypto.util';
+import { normalizarTelefoneBR } from './telefone';
 
 const CFG = { wabaId: 'WABA', phoneCap: 20, orgMaxChannels: 1, orgDailyQuota: 200, maxConnectAttempts24h: 5 };
 const ORG = '11111111-1111-1111-1111-111111111111';
@@ -37,6 +39,9 @@ function montar(over: any = {}) {
 }
 
 const DTO = { telefone: '(85) 99999-9999', nomeExibicao: 'Loja do Zé', aceitouPreRequisito: true };
+// mesmo cálculo que iniciar() faz internamente (normalizarTelefoneBR + phoneHash)
+// — permite comparar resource_id por valor exato, não só "é uma string".
+const HASH_DTO = phoneHash(normalizarTelefoneBR(DTO.telefone).e164);
 
 describe('AssistedService.iniciar', () => {
   it('recusa sem o aceite do pré-requisito', async () => {
@@ -155,6 +160,19 @@ describe('AssistedService.iniciar', () => {
     await expect(svc.iniciar(ORG, 'U', DTO)).resolves.toBeDefined();
     expect(erroLog).toHaveBeenCalled();
     erroLog.mockRestore();
+  });
+
+  it('grava channel.connect.requested e channel.connect.sms_sent com o hash do telefone', async () => {
+    const { svc, prisma } = montar();
+    await svc.iniciar(ORG, 'U', DTO);
+    const chamadas = (prisma.$executeRaw as jest.Mock).mock.calls;
+    const solicitado = chamadas.find((args: any[]) => args[3] === 'channel.connect.requested');
+    const smsEnviado = chamadas.find((args: any[]) => args[3] === 'channel.connect.sms_sent');
+    expect(solicitado).toBeDefined();
+    expect(smsEnviado).toBeDefined();
+    // resource_id (4º valor interpolado) é o HASH, nunca o telefone/dado sensível
+    expect(solicitado![4]).toBe(HASH_DTO);
+    expect(smsEnviado![4]).toBe(HASH_DTO);
   });
 });
 
@@ -289,6 +307,35 @@ describe('AssistedService.verificar', () => {
     // aqui, junto da tentativa consumida.
     expect(JSON.parse(falhou![5])).toEqual({ tentativas: 1, codigoMeta: 136008 });
   });
+
+  it('nao deixa falha ao gravar auditoria derrubar o fluxo — o canal é criado e o retorno é o do caminho feliz', async () => {
+    // .sms_sent e .registered gravam DEPOIS que a Meta já consumiu a vaga do
+    // número. Se essa falha virasse exceção, o cliente veria erro numa
+    // operação que na verdade deu certo, tentaria de novo, e queimaria outra
+    // vaga — que não volta por API. auditar() precisa engolir isso.
+    const erroLog = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined as any);
+    const { svc, prisma } = montar({
+      prisma: {
+        channelConnectionRequest: {
+          findFirst: jest.fn().mockResolvedValue(req),
+          create: jest.fn(),
+          update: jest.fn(async ({ data }: any) => data),
+        },
+        whatsappChannel: {
+          count: jest.fn(), findFirst: jest.fn(),
+          create: jest.fn().mockResolvedValue({ id: 'CANAL_OK' }),
+        },
+        $executeRaw: jest.fn().mockRejectedValue(new Error('conexão com o banco caiu')),
+      },
+    });
+    const resultado = await svc.verificar(ORG, 'REQ', '123456');
+    // mesmo retorno do caminho feliz — a operação não vira erro pro cliente
+    expect(resultado).toEqual({ canalId: 'CANAL_OK' });
+    expect(prisma.whatsappChannel.create).toHaveBeenCalled();
+    // a falha vira log de erro visível, nunca exceção propagada
+    expect(erroLog).toHaveBeenCalledWith(expect.stringContaining('channel.connect.registered'));
+    erroLog.mockRestore();
+  });
 });
 
 describe('AssistedService.reenviar', () => {
@@ -307,5 +354,28 @@ describe('AssistedService.reenviar', () => {
     });
     await expect(svc.reenviar(ORG, 'REQ', 'SMS')).rejects.toBeInstanceOf(BadRequestException);
     expect(meta.pedirCodigo).not.toHaveBeenCalled();
+  });
+});
+
+describe('AssistedService.cancelar', () => {
+  // Mínimo para exercitar o caminho e afirmar o evento de auditoria — não é
+  // o conjunto completo de testes de cancelar() (fica para a revisão final).
+  it('grava channel.connect.cancelled com o hash do telefone', async () => {
+    const req = {
+      id: 'REQ', organizationId: ORG, status: 'aguardando_codigo',
+      phoneNumberId: 'PNID', wabaId: 'WABA', phoneHash: 'HASH_CANCELAR',
+    };
+    const { svc, prisma } = montar({
+      prisma: { channelConnectionRequest: {
+        findFirst: jest.fn().mockResolvedValue(req),
+        create: jest.fn(), update: jest.fn(async ({ data }: any) => data),
+      } },
+    });
+    await svc.cancelar(ORG, 'REQ');
+    const chamadas = (prisma.$executeRaw as jest.Mock).mock.calls;
+    const cancelado = chamadas.find((args: any[]) => args[3] === 'channel.connect.cancelled');
+    expect(cancelado).toBeDefined();
+    // resource_id (4º valor interpolado) é o HASH, nunca o telefone/dado sensível
+    expect(cancelado![4]).toBe('HASH_CANCELAR');
   });
 });
