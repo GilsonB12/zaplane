@@ -66,6 +66,19 @@ export class CampaignsService {
     // a Meta confirma billable=true, via webhook).
     await this.billing.assertBalanceFor(orgId, fee.totalCents);
 
+    // 4.1) cota diária de destinatários únicos por organização — checada
+    // ANTES de criar a campanha (mesmo precedente do assertBalanceFor acima),
+    // com o público final (pós-supressão, "eligible") já resolvido. Só se
+    // aplica quando a campanha vai enfileirar agora de fato — campanha
+    // agendada (scheduledAt) ou sem elegíveis não gera INSERT nenhum aqui, e
+    // por isso não tem o que checar. Checar antes evita deixar uma campanha
+    // órfã (status 'queuing', sem nenhuma mensagem) quando a cota estoura —
+    // se checássemos só depois do create, a campanha já teria sido
+    // persistida antes do bloqueio.
+    if (eligible.length > 0 && !dto.scheduledAt) {
+      await this.quota.garantirCota(orgId, eligible.length);
+    }
+
     // 5) cria a campanha
     const campaign = await this.prisma.campaign.create({
       data: {
@@ -80,14 +93,9 @@ export class CampaignsService {
       },
     });
 
-    // 6) enfileira (uma linha por destinatário em outbound_messages)
+    // 6) enfileira (uma linha por destinatário em outbound_messages) — cota
+    // já checada no passo 4.1, antes da campanha existir
     if (eligible.length > 0 && !dto.scheduledAt) {
-      // cota diária de destinatários únicos por organização — checada agora
-      // que o público final (pós-supressão) está resolvido, imediatamente
-      // antes do INSERT na fila (o limite da Meta é do portfólio e
-      // compartilhado por todos os números, ver QuotaService)
-      await this.quota.garantirCota(orgId, eligible.length);
-
       const rows = eligible.map((c) => ({
         organizationId: orgId,
         campaignId: campaign.id,
