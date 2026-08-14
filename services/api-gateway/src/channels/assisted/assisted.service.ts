@@ -67,6 +67,24 @@ export class AssistedService {
       throw new BadRequestException('Informe o nome do negócio (2 a 60 caracteres).');
     }
 
+    const cfg = this.cfg();
+
+    // Teto por organização em 24h, contado no BANCO (não em memória — o
+    // balde do @Throttle do controller é por processo e por usuário; usuários
+    // diferentes da mesma org somam baldes independentes contra o MESMO teto
+    // global de vagas da WABA da Zaplane). Sem isso, uma org insistindo
+    // esgota a capacidade de todo mundo — e a vaga não volta por API. Checado
+    // antes de qualquer outra coisa, inclusive antes de normalizar o
+    // telefone: é o mais barato e o mais amplo dos vetos.
+    const tentativas24h = await this.prisma.channelConnectionRequest.count({
+      where: { organizationId: orgId, createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+    });
+    if (tentativas24h >= cfg.maxConnectAttempts24h) {
+      // Mensagem do catálogo — não inventar texto que revele o mecanismo
+      // (rate limit por organização) para quem está tentando abusar.
+      throw new ConflictException(ERROS_CONEXAO.capacidade);
+    }
+
     let tel;
     try {
       tel = normalizarTelefoneBR(dto.telefone);
@@ -77,7 +95,6 @@ export class AssistedService {
       throw e;
     }
     const hash = phoneHash(tel.e164);
-    const cfg = this.cfg();
 
     // Travas ANTES de qualquer escrita na Meta — a vaga do número não volta por API.
     const jaTem = await this.prisma.whatsappChannel.count({
@@ -106,7 +123,16 @@ export class AssistedService {
     // 5xx, rede) é motivo para NÃO prosseguir — seguir otimista queimaria uma
     // vaga que não volta.
     const capacidade = await this.meta.contarNumeros(cfg.wabaId);
-    if (!capacidade.ok || capacidade.total >= cfg.phoneCap) {
+    if (!capacidade.ok) {
+      // Sem este log, uma falha de credencial (token vazio/expirado) chega
+      // ao cliente como "capacidade cheia" e ao operador como silêncio total
+      // — não há como distinguir "WABA realmente lotada" de "token ruim".
+      this.logger.error(
+        `contarNumeros falhou (waba ${cfg.wabaId}): código ${capacidade.codigo} — ${capacidade.detalhe}`,
+      );
+      throw new ConflictException(ERROS_CONEXAO.capacidade);
+    }
+    if (capacidade.total >= cfg.phoneCap) {
       throw new ConflictException(ERROS_CONEXAO.capacidade);
     }
 

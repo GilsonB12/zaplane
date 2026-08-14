@@ -30,6 +30,11 @@ export default () => ({
     graphVersion: process.env.WHATSAPP_GRAPH_API_VERSION || 'v21.0',
     webhookVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || '',
     appSecret: process.env.WHATSAPP_APP_SECRET || '',
+    // Token de System User da Zaplane (Meta Business) — NÃO é o token por
+    // canal do cliente (esse vem cifrado do banco, ver dispatcher). É o
+    // token usado pela CONEXÃO ASSISTIDA para adicionar, verificar e
+    // registrar o número do cliente na WABA da própria Zaplane.
+    accessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
   },
   encryptionKey: process.env.APP_ENCRYPTION_KEY || '',
   webhookPublicUrl: process.env.WEBHOOK_PUBLIC_URL || '',
@@ -79,5 +84,15 @@ export default () => ({
     // (Meta, desde 07/10/2025). Sem cota por org, um cliente consome o pote de
     // todos. Ver spec §2.
     orgDailyQuota: parseInt(process.env.ORG_DAILY_MESSAGE_QUOTA || '200', 10),
+    // Teto de tentativas de conexão assistida por organização em 24h
+    // (qualquer status). O recurso protegido — vagas de número na WABA da
+    // Zaplane (ZAPLANE_WABA_PHONE_CAP) — é GLOBAL, compartilhado por toda a
+    // plataforma, mas o @Throttle do controller conta por USUÁRIO autenticado
+    // (chave `u:${sub}` no TenantThrottlerGuard) — usuários diferentes da
+    // MESMA organização somam baldes independentes contra o mesmo teto
+    // global. Sem esta trava contada no banco, por organização, uma única
+    // organização insistindo esgota as vagas de todo mundo em minutos — a
+    // vaga não volta por API.
+    maxConnectAttempts24h: parseInt(process.env.ORG_MAX_CONNECT_ATTEMPTS_24H || '5', 10),
   },
 });

@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AssistedService } from './assisted.service';
 
-const CFG = { wabaId: 'WABA', phoneCap: 20, orgMaxChannels: 1, orgDailyQuota: 200 };
+const CFG = { wabaId: 'WABA', phoneCap: 20, orgMaxChannels: 1, orgDailyQuota: 200, maxConnectAttempts24h: 5 };
 const ORG = '11111111-1111-1111-1111-111111111111';
 
 function montar(over: any = {}) {
@@ -12,6 +12,7 @@ function montar(over: any = {}) {
       findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn(async ({ data }: any) => ({ id: 'REQ', ...data })),
       update: jest.fn(async ({ data }: any) => ({ id: 'REQ', ...data })),
+      count: jest.fn().mockResolvedValue(0),
     },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
     ...over.prisma,
@@ -43,18 +44,44 @@ describe('AssistedService.iniciar', () => {
     await expect(svc.iniciar(ORG, 'U', DTO)).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('recusa quando a organização já tentou 5 vezes nas últimas 24h — sem chamar a Meta', async () => {
+    // Recurso protegido (vagas na WABA da Zaplane) é GLOBAL; o @Throttle do
+    // controller conta por usuário, então usuários diferentes da mesma org
+    // driblariam o throttle somando baldes. Esta trava é contada no banco,
+    // por organização, e roda ANTES de qualquer chamada (leitura ou escrita)
+    // à Meta — nem contarNumeros deve ser chamado.
+    const { svc, meta } = montar({
+      prisma: {
+        channelConnectionRequest: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn(),
+          update: jest.fn(),
+          count: jest.fn().mockResolvedValue(5),
+        },
+      },
+    });
+    await expect(svc.iniciar(ORG, 'U', DTO)).rejects.toBeInstanceOf(ConflictException);
+    expect(meta.contarNumeros).not.toHaveBeenCalled();
+    expect(meta.adicionarNumero).not.toHaveBeenCalled();
+  });
+
   it('recusa quando a WABA está lotada — sem chamar a Meta para adicionar', async () => {
     const { svc, meta } = montar({ meta: { contarNumeros: jest.fn().mockResolvedValue({ ok: true, total: 20 }) } });
     await expect(svc.iniciar(ORG, 'U', DTO)).rejects.toThrow(/capacidade/i);
     expect(meta.adicionarNumero).not.toHaveBeenCalled();
   });
 
-  it('recusa quando não consegue verificar a capacidade da WABA — falha fechado', async () => {
+  it('recusa quando não consegue verificar a capacidade da WABA — falha fechado, e loga o motivo', async () => {
+    // Sem este log, uma falha de credencial (token vazio/expirado) chega ao
+    // operador como silêncio total — indistinguível de "WABA realmente lotada".
+    const erroLog = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined as any);
     const { svc, meta } = montar({
       meta: { contarNumeros: jest.fn().mockResolvedValue({ ok: false, codigo: 190, detalhe: 'token expirado' }) },
     });
     await expect(svc.iniciar(ORG, 'U', DTO)).rejects.toThrow(/capacidade/i);
     expect(meta.adicionarNumero).not.toHaveBeenCalled();
+    expect(erroLog).toHaveBeenCalledWith(expect.stringContaining('190'));
+    erroLog.mockRestore();
   });
 
   it('recusa número que já é de outra organização', async () => {
@@ -68,6 +95,7 @@ describe('AssistedService.iniciar', () => {
           ),
           create: jest.fn(),
           update: jest.fn(),
+          count: jest.fn().mockResolvedValue(0),
         },
       },
     });
@@ -89,6 +117,7 @@ describe('AssistedService.iniciar', () => {
           findFirst: jest.fn().mockResolvedValue(null),
           create: jest.fn().mockRejectedValue(colisao),
           update: jest.fn(),
+          count: jest.fn().mockResolvedValue(0),
         },
       },
     });

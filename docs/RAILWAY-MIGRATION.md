@@ -136,6 +136,11 @@ Dockerfile.
   WHATSAPP_GRAPH_API_VERSION=v21.0
   WHATSAPP_WEBHOOK_VERIFY_TOKEN=<mesmo valor do servidor atual>
   WHATSAPP_APP_SECRET=<mesmo valor do servidor atual>
+  WHATSAPP_ACCESS_TOKEN=<token do System User da Zaplane — obrigatório para a
+                          CONEXÃO ASSISTIDA (adicionar/verificar/registrar
+                          número na WABA da Zaplane); mesmo valor do servidor
+                          atual. Sem ele a conexão assistida falha por
+                          autenticação para todo mundo>
   APP_ENCRYPTION_KEY=<MESMO valor do servidor atual — trocar quebra a
                        descriptografia dos tokens de canal já salvos>
   BILLING_USAGE_PRICE_CENTS=43
