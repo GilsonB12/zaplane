@@ -10,6 +10,11 @@ export const ERROS_CONEXAO = {
   sms_limite: 'Aguarde alguns minutos para pedir um novo código.',
   capacidade: 'Estamos com a capacidade cheia. Nossa equipe entra em contato.',
   generico: 'Não foi possível concluir agora. Tente novamente em alguns minutos.',
+  // Requisição de verificação sem código, com a verificação ainda PENDENTE.
+  // Não é erro da Meta (nem chegamos a falar com ela): é a tela pedindo o
+  // registro cedo demais. Por isso o texto pode ser direto — ele não conta
+  // nada sobre o número, então não abre o oráculo que o resto do catálogo fecha.
+  codigo_obrigatorio: 'Digite o código de 6 dígitos que enviamos por SMS.',
 } as const;
 
 /** Limite de vazão / cota — vale a pena tentar de novo mais tarde. */

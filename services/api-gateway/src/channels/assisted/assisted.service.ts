@@ -363,7 +363,10 @@ export class AssistedService {
     return { ok: true };
   }
 
-  async verificar(orgId: string, id: string, codigo: string) {
+  /** `codigo` é opcional: quando a Meta já aceitou o código numa tentativa
+   *  anterior e só o registro falhou, não há o que digitar. Ver a trava logo
+   *  abaixo — quem decide se a ausência é aceitável é o BANCO. */
+  async verificar(orgId: string, id: string, codigo?: string) {
     const req = await this.buscarViva(orgId, id);
     // Mesma trava de reenviar(): sem phoneNumberId a chamada iria pra Meta
     // com "null" na URL, tomaria 400, e isso seria contado como código
@@ -378,6 +381,18 @@ export class AssistedService {
     // registro, que é a única etapa que ainda falta.
     const jaVerificado = await this.verificacaoConcluida(req.id);
 
+    // Trava que acompanha o `codigo` opcional do DTO: pular o código só é
+    // aceitável quando a verificação ACONTECEU de fato, e isso é uma leitura do
+    // banco — nunca uma afirmação do cliente. Com a verificação pendente e sem
+    // código, recusa AQUI, antes de qualquer chamada à Meta: um `verify_code`
+    // com valor vazio (ou com o "000000" de fachada que a tela mandava para
+    // satisfazer o DTO) seria uma tentativa REAL, contada contra as 5 chances
+    // do cliente — e as 5 esgotadas matam a solicitação com a vaga do número já
+    // consumida na WABA, vaga que não volta por API.
+    if (!jaVerificado && !codigo) {
+      throw new BadRequestException(ERROS_CONEXAO.codigo_obrigatorio);
+    }
+
     let pin: string | null = null;
     if (jaVerificado) {
       // reusa o MESMO PIN: se o register anterior chegou a acontecer na Meta e
@@ -385,7 +400,10 @@ export class AssistedService {
       // de duas etapas do número.
       pin = this.pinGuardado(req.registerPinEnc);
     } else {
-      const v = await this.meta.verificarCodigo(req.phoneNumberId!, codigo);
+      // `codigo!`: neste ramo `jaVerificado` é false, e a trava acima já
+      // recusou o par (pendente, sem código) — o TypeScript é que não
+      // correlaciona as duas condições.
+      const v = await this.meta.verificarCodigo(req.phoneNumberId!, codigo!);
       if (!v.ok) {
         const tentativas = req.codeAttempts + 1;
         const queimou = tentativas >= MAX_TENTATIVAS_CODIGO;

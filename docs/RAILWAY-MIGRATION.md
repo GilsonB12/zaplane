@@ -94,6 +94,7 @@ psql "$PGURL" -f db/migrations/009_channel_alerts.sql
 psql "$PGURL" -f db/migrations/010_channel_payment_ack.sql
 psql "$PGURL" -f db/migrations/011_password_reset.sql
 psql "$PGURL" -f db/migrations/012_queue_resilience.sql
+psql "$PGURL" -f db/migrations/013_conexao_assistida.sql
 ```
 
 > **Não** rode `002_seed_dev.sql` — é dado de exemplo, não produção.
@@ -107,6 +108,61 @@ psql "$PGURL" -f db/migrations/012_queue_resilience.sql
 > 📌 Ao adicionar uma migração nova, **acrescente a linha aqui também** — esta
 > lista já ficou desatualizada uma vez e quem seguisse o passo a passo montaria
 > um ambiente sem as colunas mais recentes.
+
+### 4.1 Ordem do deploy da conexão assistida (leia antes de dar `git push`)
+
+**A migração `013` vai ANTES do código. Não é recomendação, é ordem obrigatória
+— e desta vez o estrago não fica na feature nova, fica na plataforma inteira.**
+
+Por quê: o Prisma **nunca faz `SELECT *`**, ele lista as colunas uma a uma na
+consulta. O `services/api-gateway/prisma/schema.prisma` já declara colunas que
+só existem depois da `013` — principalmente `register_pin_enc` em
+`whatsapp_channels`. Resultado: com o código novo no ar e a `013` não aplicada,
+**toda** consulta a `whatsapp_channels` morre com *"column
+whatsapp_channels.register_pin_enc does not exist"*. Isso é a listagem de
+canais, a criação de campanha, o envio, o webhook de status — para **todos os
+clientes**, inclusive os que já pagam e nem sabem que existe conexão assistida.
+Não é uma feature quebrada; é o produto fora do ar.
+
+Sequência certa, na ordem:
+
+1. **Aplique a `013` com o código ANTIGO ainda rodando.** Ela é aditiva: cria
+   `channel_connection_requests` (tabela nova), acrescenta colunas opcionais e
+   troca o `CHECK` de `connected_via` por um que aceita mais um valor. O código
+   antigo continua funcionando normalmente com ela já aplicada — é por isso que
+   essa é a ordem segura, e não o contrário.
+   ```bash
+   psql "$PGURL" -f db/migrations/013_conexao_assistida.sql
+   ```
+2. **Confira** que aplicou (o `psql` não deve ter impresso `ERROR`):
+   ```bash
+   psql "$PGURL" -c "\d channel_connection_requests" -c "\d whatsapp_channels"
+   ```
+3. **Só então** `git push` — o Railway rebuilda `zaplane-gateway` e
+   `zaplane-dispatcher`.
+4. **Depois** ligue a feature, definindo `ZAPLANE_WABA_ID` **e**
+   `WHATSAPP_ACCESS_TOKEN` (ver §5.1 e §5.2).
+
+> Já deu `git push` antes da migração? Não precisa reverter nada: aplique a
+> `013` **agora**. Ela não depende do código novo, e assim que ela entra as
+> consultas voltam a funcionar (o Prisma não guarda cache de schema).
+
+**As duas variáveis da feature entram no MESMO deploy — nunca só a WABA.**
+O gateway trata os dois casos de propósito, e de formas diferentes:
+
+- `ZAPLANE_WABA_ID` **ausente** → a conexão assistida fica **desligada**. O boot
+  é normal (a API sobe, campanhas e cobrança seguem funcionando) e as rotas
+  `/channels/assisted` respondem **503** com texto honesto. É o estado em que a
+  produção está hoje, e é seguro.
+- `ZAPLANE_WABA_ID` **definido** com `WHATSAPP_ACCESS_TOKEN` **vazio** → feature
+  ligada pela metade, que é o estado perigoso: toda chamada à Meta falharia por
+  autenticação e o cliente leria *"Estamos com a capacidade cheia"*, que é
+  mentira. Por isso o gateway **recusa iniciar** em produção nesse caso — o
+  deploy falha na cara do operador em vez de mentir para o cliente.
+
+Na prática, no Railway: use o **Raw Editor** das Variables para colar as duas de
+uma vez, para que um único redeploy carregue as duas. Se você salvar só a WABA,
+o serviço reinicia e **não sobe** até o token entrar.
 
 ## 5. Os 4 serviços
 
@@ -158,6 +214,61 @@ Dockerfile.
   `cat services/api-gateway/.env` — copie e cole direto no Railway, nunca num
   arquivo do git.
 
+#### Variáveis da conexão assistida
+
+Todas saem de `src/config/configuration.ts` (bloco `assisted`) e estão
+comentadas em `services/api-gateway/.env.example`. **Só as duas primeiras
+precisam de valor real**; as outras já têm default embutido no código e só
+existem para você poder apertar ou afrouxar um limite sem novo deploy de código.
+
+```
+ZAPLANE_WABA_ID=<ID da WABA da Zaplane, no WhatsApp Manager>
+WHATSAPP_ACCESS_TOKEN=<System User da Zaplane — já está na lista acima>
+ZAPLANE_WABA_PHONE_CAP=20
+ORG_MAX_CHANNELS=1
+ORG_DAILY_MESSAGE_QUOTA=200
+ORG_MAX_CONNECT_ATTEMPTS_24H=5
+ORG_MAX_BURNED_SLOTS_24H=2
+META_HTTP_TIMEOUT_MS=15000
+```
+
+O que cada uma faz e **o que acontece se faltar**:
+
+- **`ZAPLANE_WABA_ID`** (default: vazio) — a WABA da Zaplane que recebe os
+  números dos clientes. **Faltando:** a conexão assistida fica desligada; as
+  rotas `/channels/assisted` respondem 503 e o roteamento de alertas da Meta
+  deixa de distinguir a WABA compartilhada da plataforma (um alerta de conta
+  passa a ser espalhado para todos os canais daquela WABA). O boot é normal.
+- **`WHATSAPP_ACCESS_TOKEN`** (default: vazio) — o System User da Zaplane, o
+  único token que fala com essa WABA. **Faltando** *com a WABA definida:* o
+  gateway **recusa iniciar em produção** (ver §4.1). Se essa checagem não
+  existisse, o cliente receberia "capacidade cheia" para sempre.
+- **`ZAPLANE_WABA_PHONE_CAP`** (default: `20`) — quantos números cabem na WABA.
+  É o teto que a Meta impõe (2 sem empresa verificada, 20 depois da
+  verificação), repetido aqui para o gateway recusar **antes** de gastar a
+  chamada. **Faltando:** assume 20 — se a WABA real ainda for de 2, o cliente
+  chega até a Meta e leva o erro de lá, gastando uma tentativa à toa.
+- **`ORG_MAX_CHANNELS`** (default: `1`) — canais ativos por organização.
+  **Faltando:** assume 1, que é o plano vendido hoje.
+- **`ORG_DAILY_MESSAGE_QUOTA`** (default: `200`) — destinatários por
+  organização em 24h. O limite de mensagens da Meta é do **portfólio**, ou seja,
+  compartilhado por todos os números da plataforma. **Faltando:** assume 200; se
+  você aumentar demais, um cliente sozinho consome a capacidade de todos.
+- **`ORG_MAX_CONNECT_ATTEMPTS_24H`** (default: `5`) — tentativas de conexão por
+  organização em 24h, contadas **no banco** (o rate limit por usuário do
+  controller não segura isso: dois usuários da mesma empresa somam baldes
+  separados). **Faltando:** assume 5.
+- **`ORG_MAX_BURNED_SLOTS_24H`** (default: `2`) — **a trava mais importante do
+  fluxo.** Conta *vagas queimadas*: solicitações em que a Meta já aceitou o
+  número (a vaga foi consumida) e que não terminaram conectadas. A vaga **não
+  volta por API** — a baixa é manual, no WhatsApp Manager. **Faltando:** assume
+  2, o que limita o estrago diário de uma única organização a ~10% da
+  capacidade da WABA inteira. Não aumente sem entender isso.
+- **`META_HTTP_TIMEOUT_MS`** (default: `15000`) — timeout de cada chamada à
+  Graph API neste fluxo. **Faltando:** assume 15s. Valor inválido (texto, zero)
+  também cai no default — sem timeout, uma chamada pendurada travaria a
+  requisição do cliente com a vaga já consumida.
+
 ### 5.2 `dispatcher` (Go)
 - **Root directory:** `services/dispatcher`
 - **Build command:** `go build -o dispatcher ./cmd/dispatcher`
@@ -168,13 +279,38 @@ Dockerfile.
   ```
   DATABASE_URL=<a mesma do Postgres do Railway>
   WHATSAPP_GRAPH_API_VERSION=v21.0
+  WHATSAPP_ACCESS_TOKEN=<MESMO token do gateway — OBRIGATÓRIO, ver abaixo>
+  APP_ENCRYPTION_KEY=<MESMO valor do gateway>
   WORKER_CONCURRENCY=4
   BATCH_SIZE=50
   POLL_INTERVAL_MS=750
   DEFAULT_RATE_PER_SEC=20
   ```
-  (`WHATSAPP_ACCESS_TOKEN` fica vazio — os tokens reais são por canal, vêm
-  cifrados do banco.)
+
+  > ⚠️ **`WHATSAPP_ACCESS_TOKEN` deixou de ser opcional aqui.** Versões
+  > anteriores deste guia mandavam deixar vazio, e estava certo enquanto cada
+  > cliente trazia o próprio token — o gateway gravava esse token cifrado na
+  > linha do canal e o worker usava ele.
+  >
+  > Na **conexão assistida** o número vive na WABA da própria Zaplane, e o token
+  > que fala com ela é o da plataforma. O gateway, de propósito, **grava o campo
+  > de token do canal vazio** (`access_token_enc = ''`) para não copiar o
+  > segredo da Zaplane em cada linha; o worker então cai no fallback do
+  > ambiente, que é justamente esta variável (`resolveToken`, em
+  > `internal/worker/worker.go`).
+  >
+  > Com ela vazia, **toda** mensagem desses canais falha com `no_token` — e
+  > falha *depois* de o cliente ter visto "Número conectado" na tela. Ele acha
+  > que está tudo pronto e nada sai.
+  >
+  > Use o **mesmo valor** do gateway. Se o token da plataforma for rotacionado,
+  > troque nos dois serviços.
+
+  > `APP_ENCRYPTION_KEY` também é necessária aqui, pelo motivo oposto: os canais
+  > **antigos** (`connected_via` = `manual` ou `embedded_signup`) guardam o token
+  > do cliente cifrado no banco, e sem a chave o worker manda o texto cifrado
+  > para a Meta como se fosse token — todo envio desses clientes falha por
+  > autenticação. Tem de ser exatamente a mesma chave do gateway.
 
 ### 5.3 `importer` (FastAPI)
 - **Root directory:** `services/importer`
@@ -278,4 +414,183 @@ Review:
       devolve o challenge)
 - [ ] Billing (Asaas) segue funcionando — teste um evento de webhook
 - [ ] `WEBHOOK_PUBLIC_URL` no gateway aponta pra `api.zaplane.com.br`
+- [ ] Migração `013` aplicada **antes** do push do código (§4.1)
+- [ ] `ZAPLANE_WABA_ID` e `WHATSAPP_ACCESS_TOKEN` definidos **juntos** no gateway
+- [ ] `WHATSAPP_ACCESS_TOKEN` e `APP_ENCRYPTION_KEY` definidos também no
+      dispatcher (§5.2) — sem eles o envio falha depois de o cliente ver
+      "Número conectado"
 - [ ] Ubuntu mantido de standby por alguns dias antes de desligar de vez
+
+## 12. Diagnóstico: "não consigo conectar meu número"
+
+O erro real da Meta **não** aparece para o cliente, de propósito: se aparecesse,
+a rota viraria um oráculo de enumeração — bastaria tentar números alheios e ler
+a resposta para descobrir quem já é cliente da plataforma. "Número em uso",
+"número inválido" e "número com WhatsApp ativo" devolvem todos o mesmo texto
+(`src/channels/assisted/erros.ts`).
+
+O contrapeso é o rastro do lado de dentro: o **código numérico** da Meta vai
+para `audit_logs` e para o log do gateway no Railway (logger
+`ConexaoAssistida`). As consultas abaixo são o jeito de ler esse rastro — sem
+elas, o suporte fica sem nada para olhar.
+
+Rode tudo com o `$PGURL` do §4 (`psql "$PGURL"`). **São consultas de leitura**;
+nenhuma altera dado.
+
+### 12.1 Chegando na solicitação (e no `phone_hash`)
+
+`audit_logs.resource_id` guarda o **hash** do telefone, nunca o número — é um
+HMAC-SHA256 com a `APP_ENCRYPTION_KEY` (`phoneHash`, em
+`src/common/crypto.util.ts`). Você **não** consegue calcular esse hash na mão, e
+não deve tentar: a chave não sai do painel de variáveis. O caminho é o inverso —
+ache a solicitação pelos campos em claro e **leia o hash dela**.
+
+O que fica legível em `channel_connection_requests`: a organização, o DDD, os 4
+últimos dígitos e o nome do negócio. O número inteiro fica cifrado.
+
+```sql
+-- 1) do e-mail do cliente para a organização
+SELECT o.id AS organization_id, o.name, u.email, u.role
+  FROM organizations o
+  JOIN users u ON u.organization_id = o.id
+ WHERE lower(u.email) = lower('cliente@exemplo.com');
+```
+
+```sql
+-- 2) as solicitações dessa organização — a última linha é a que ele está
+--    tentando agora. É daqui que sai o phone_hash usado no resto.
+SELECT id,
+       created_at, updated_at,
+       status,
+       '(' || phone_ddd || ') ' || '••••-' || phone_last4 AS numero,
+       display_name,
+       phone_number_id,          -- preenchido = a Meta ACEITOU o número (vaga consumida)
+       code_requests,            -- quantos SMS/ligações já pediu (teto 3 em 24h)
+       code_attempts,            -- quantos códigos errados (5 = solicitação morre)
+       code_verified_at,         -- preenchido = código já aceito; falta só o registro
+       error_code,
+       error_detail,
+       phone_hash
+  FROM channel_connection_requests
+ WHERE organization_id = '<organization_id do passo 1>'
+ ORDER BY created_at DESC
+ LIMIT 20;
+```
+
+Como ler o `status`: `criando` (número ainda não aceito pela Meta),
+`aguardando_codigo` (SMS enviado), `concluida`, `falhou`, `cancelada`.
+`error_code` traz **ou** o código numérico da Meta em texto, **ou** um motivo
+nosso: `codigo_esgotado` (5 erros de código), `numero_de_outra_org` (o número já
+pertence a outro cliente), `pnid_de_outra_org` (registrou na Meta mas o canal já
+existia em outra organização — precisa de baixa manual), `canal_nao_criado`
+(falha nossa depois do registro; a solicitação continua retomável).
+
+### 12.2 Histórico completo daquela solicitação
+
+```sql
+SELECT created_at, action, actor_user_id, metadata
+  FROM audit_logs
+ WHERE resource_type = 'channel_connection'
+   AND resource_id = '<phone_hash da consulta 2>'
+ ORDER BY created_at;
+```
+
+As ações que este fluxo grava, em ordem de acontecimento:
+
+| `action`                          | significa                                              | `metadata`                          |
+|-----------------------------------|--------------------------------------------------------|-------------------------------------|
+| `channel.connect.requested`       | o cliente pediu a conexão                               | `{}`                                |
+| `channel.connect.sms_sent`        | a Meta aceitou o número e o SMS saiu                    | `{}`                                |
+| `channel.connect.resend_failed`   | falhou reenviar o código                                | `{ metodo, codigoMeta }`            |
+| `channel.connect.verify_failed`   | código recusado pela Meta                               | `{ tentativas, codigoMeta }`        |
+| `channel.connect.register_failed` | código OK, mas o registro na Meta falhou                | `{ codigoMeta }`                    |
+| `channel.connect.channel_failed`  | registrou na Meta e o canal não nasceu no nosso banco   | `{ motivo }`                        |
+| `channel.connect.registered`      | conectado (`reaproveitado` = a retentativa reaproveitou o canal) | `{ canalId, reaproveitado? }` |
+| `channel.connect.cancelled`       | o cliente cancelou                                      | `{}`                                |
+
+Sem `sms_sent`, o número nunca chegou a ser aceito — o problema é anterior ao
+SMS. Com `sms_sent` e vários `verify_failed`, o cliente está digitando o código
+errado (ou o SMS chegou para outro aparelho). Com `register_failed` e
+`code_verified_at` preenchido, o código já está aceito: o cliente só precisa
+apertar **"Concluir conexão"** no painel, sem digitar nada.
+
+> ⚠️ A gravação da auditoria é **best-effort** — se o INSERT falhar, o fluxo do
+> cliente continua (era isso ou fazer o cliente queimar outra vaga por um erro
+> nosso) e fica só um `ERROR` no log do gateway. Ausência de linha aqui não é
+> prova de que nada aconteceu: confira também o `error_code` da consulta 12.1 e
+> os logs do `zaplane-gateway` no Railway.
+
+### 12.3 Os códigos de erro da Meta que ficaram registrados
+
+```sql
+SELECT created_at,
+       action,
+       metadata->>'codigoMeta'  AS codigo_meta,
+       metadata->>'tentativas'  AS tentativa,
+       metadata->>'metodo'      AS metodo,
+       metadata->>'motivo'      AS motivo
+  FROM audit_logs
+ WHERE resource_type = 'channel_connection'
+   AND resource_id = '<phone_hash>'
+   AND action LIKE 'channel.connect.%failed'
+ ORDER BY created_at;
+```
+
+`codigo_meta` é o número que a Meta devolveu — é ele que se procura na
+documentação de erros da Cloud API. Os mais comuns neste fluxo: `133005` (PIN de
+duas etapas incorreto), `133006` (número precisa ser verificado antes de
+registrar), `136008`/`136024` (problema com o número), `100` (parâmetro
+inválido) e `4`/`80007` (limite de vazão — vale tentar mais tarde).
+
+### 12.4 Quantas conexões falharam no período
+
+```sql
+-- panorama por dia (últimos 7 dias)
+SELECT date_trunc('day', created_at)::date            AS dia,
+       count(*)                                        AS tentativas,
+       count(*) FILTER (WHERE status = 'concluida')    AS conectadas,
+       count(*) FILTER (WHERE status = 'falhou')       AS falhadas,
+       count(*) FILTER (WHERE status = 'cancelada')    AS canceladas,
+       count(*) FILTER (WHERE phone_number_id IS NOT NULL
+                          AND status <> 'concluida')   AS vagas_queimadas
+  FROM channel_connection_requests
+ WHERE created_at >= now() - interval '7 days'
+ GROUP BY 1
+ ORDER BY 1 DESC;
+```
+
+`vagas_queimadas` é a coluna para vigiar: cada linha aí é uma vaga da WABA da
+Zaplane consumida **sem** virar cliente conectado, e essa vaga **não volta por
+API** — a baixa é manual, no WhatsApp Manager (a rota
+`GET /channels/assisted/orphans`, restrita a `owner`, lista os números órfãos).
+
+```sql
+-- por que falharam, agrupado (últimos 7 dias)
+SELECT coalesce(error_code, '(sem código)') AS motivo,
+       count(*)                             AS ocorrencias,
+       max(created_at)                      AS mais_recente
+  FROM channel_connection_requests
+ WHERE created_at >= now() - interval '7 days'
+   AND status <> 'concluida'
+ GROUP BY 1
+ ORDER BY 2 DESC;
+```
+
+```sql
+-- os códigos da Meta mais frequentes no período, olhando a auditoria
+SELECT metadata->>'codigoMeta' AS codigo_meta,
+       count(*)                AS ocorrencias,
+       min(created_at)         AS primeira,
+       max(created_at)         AS ultima
+  FROM audit_logs
+ WHERE resource_type = 'channel_connection'
+   AND action LIKE 'channel.connect.%failed'
+   AND created_at >= now() - interval '7 days'
+ GROUP BY 1
+ ORDER BY 2 DESC;
+```
+
+Um mesmo código repetido em organizações diferentes quase nunca é problema do
+cliente: é token expirado, WABA lotada ou mudança de versão da Graph API. Nesse
+caso, olhe o log do `zaplane-gateway` (as falhas de `contarNumeros` e
+`inscreverWebhook` só existem lá) antes de responder ao cliente.

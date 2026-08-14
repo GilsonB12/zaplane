@@ -93,7 +93,11 @@ export const ackChannelPayment = (id, confirmado = true) =>
 export const conexaoAtual = () => api.get("/channels/assisted/current");
 export const iniciarConexao = (dto) => api.post("/channels/assisted", dto);
 export const reenviarCodigo = (id, metodo) => api.post(`/channels/assisted/${id}/resend`, { metodo });
-export const verificarCodigo = (id, codigo) => api.post(`/channels/assisted/${id}/verify`, { codigo });
+// `codigo` é opcional: quando o servidor já registrou a verificação, o corpo
+// vai VAZIO — não existe código a digitar e mandar um valor de fachada faria o
+// backend gastar uma das 5 tentativas do cliente se o estado estivesse errado.
+export const verificarCodigo = (id, codigo) =>
+  api.post(`/channels/assisted/${id}/verify`, codigo ? { codigo } : {});
 export const cancelarConexao = (id) => api.del(`/channels/assisted/${id}`);
 
 /* ---- Billing ---- */

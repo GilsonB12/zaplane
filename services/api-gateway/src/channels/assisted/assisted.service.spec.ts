@@ -417,6 +417,37 @@ describe('AssistedService.verificar', () => {
     }
   });
 
+  it('conclui SEM código quando a verificação já aconteceu — a tela não precisa inventar um "000000"', async () => {
+    // Ramo que o `codigo` opcional existe para servir: a Meta já aceitou o
+    // código, só o registro falhou, e não há nada a digitar. Enquanto o DTO
+    // exigia 6 dígitos, o botão "Concluir conexão" mandava um valor de fachada
+    // — que vira tentativa REAL na Meta se o estado "já verificado" estiver
+    // errado, queimando uma das 5 chances do cliente.
+    const { svc, meta } = comReq(
+      { prisma: { $queryRaw: jest.fn().mockResolvedValue([{ verificado: true }]) } },
+      { ...req, registerPinEnc: encrypt('424242') },
+    );
+    // terceiro argumento AUSENTE — é exatamente assim que a rota chama quando
+    // o corpo vem sem `codigo`.
+    await expect(svc.verificar(ORG, 'REQ')).resolves.toEqual({ canalId: 'CANAL1' });
+    expect(meta.verificarCodigo).not.toHaveBeenCalled();
+    expect(meta.registrar).toHaveBeenCalledWith('PNID', '424242');
+  });
+
+  it('recusa SEM código quando a verificação ainda está PENDENTE — sem chamar a Meta e sem gastar tentativa', async () => {
+    // O outro lado da mesma trava. Sem ela, um corpo vazio chegaria à Meta como
+    // verify_code de valor vazio: a Meta recusa, e a recusa é contabilizada
+    // como código errado — 5 delas matam a solicitação com a vaga do número já
+    // consumida na WABA, e a vaga não volta por API.
+    const { svc, prisma, meta } = comReq(); // $queryRaw padrão ([]) = não verificada
+    await expect(svc.verificar(ORG, 'REQ')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(svc.verificar(ORG, 'REQ')).rejects.toThrow(ERROS_CONEXAO.codigo_obrigatorio);
+    expect(meta.verificarCodigo).not.toHaveBeenCalled();
+    expect(meta.registrar).not.toHaveBeenCalled();
+    // nenhuma escrita: a tentativa não foi contada contra o cliente
+    expect(prisma.channelConnectionRequest.update).not.toHaveBeenCalled();
+  });
+
   it('gera um PIN novo se o guardado não puder ser decifrado, em vez de travar a solicitação', async () => {
     const erroLog = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined as any);
     const { svc, meta } = comReq(

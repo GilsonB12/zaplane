@@ -19,12 +19,6 @@ const PASSO_POR_STATUS = {
   aguardando_codigo: "codigo",     // SMS enviado: o código já pode ser digitado
 };
 
-// A rota de verificação exige 6 dígitos no corpo, mas quando o servidor já
-// registrou a verificação (`codigoJaVerificado`) ele pula direto para o
-// registro e ignora o que vier aqui. Mandamos um valor só para satisfazer o
-// formato — ele nunca aparece na tela nem é digitado por ninguém.
-const CODIGO_JA_ACEITO = "000000";
-
 // A solicitação some do lado do servidor em dois casos: expirou/foi cancelada
 // (o buscarViva() do backend responde 404 "Conexão não encontrada") ou
 // esgotou as 5 tentativas de código (a própria 5ª resposta já vem com essa
@@ -376,8 +370,11 @@ export default function ConectarNumeroWizard({ nomeOrganizacao, onConectado }) {
   }
 
   // Verificação já aceita pela Meta numa tentativa anterior — só o registro
-  // ficou faltando. O servidor ignora qualquer código enviado agora, então
-  // pedir os 6 dígitos de novo seria pedir uma digitação inútil.
+  // ficou faltando. Aqui a requisição vai SEM código: o campo é opcional na
+  // rota justamente para isto. Antes era preciso mandar um "000000" de fachada
+  // só para passar na validação — e se o estado "já verificado" estivesse
+  // errado, aquele valor virava uma tentativa real na Meta e queimava uma das
+  // 5 chances do cliente. Sem código, o pior caso agora é um 400 honesto.
   if (passo === "codigo" && req?.codigoJaVerificado) {
     return (
       <div className={caixa}>
@@ -388,7 +385,7 @@ export default function ConectarNumeroWizard({ nomeOrganizacao, onConectado }) {
         </p>
         {erro && <div className={`mt-3 ${caixaErro}`}>{erro}</div>}
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button disabled={ocupado} onClick={() => confirmar(CODIGO_JA_ACEITO)}
+          <button disabled={ocupado} onClick={() => confirmar()}
             className="rounded-xl px-3.5 py-2.5 text-sm font-semibold text-white disabled:opacity-40 sm:py-2"
             style={{ backgroundColor: BRAND }}>
             {ocupado ? "Concluindo…" : "Concluir conexão"}
