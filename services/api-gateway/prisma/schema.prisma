@@ -138,6 +138,10 @@ model ChannelConnectionRequest {
   codeRequests   Int     @default(0) @map("code_requests")
   codeAttempts   Int     @default(0) @map("code_attempts")
   lastCodeSentAt DateTime? @map("last_code_sent_at") @db.Timestamptz(6)
+  // Quando a Meta ACEITOU o código (migração 013). Preenchida ANTES do
+  // /register: é o que deixa a segunda tentativa pular direto para o registro
+  // em vez de reenviar um código que a Meta já não aceita.
+  codeVerifiedAt DateTime? @map("code_verified_at") @db.Timestamptz(6)
   errorCode      String?   @map("error_code")
   errorDetail    String?   @map("error_detail")
   channelId      String?   @map("channel_id") @db.Uuid

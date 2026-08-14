@@ -3,6 +3,26 @@ import { ReconciliacaoService } from './reconciliacao.service';
 
 const CFG = { get: () => ({ wabaId: 'W' }) } as any;
 
+/** Banco de mentira que aplica ao fixture o MESMO filtro de status declarado
+ *  pela consulta (lido do texto do SQL, do lado do UNION que lê
+ *  channel_connection_requests). É o que dá poder de falha ao teste: um
+ *  `$queryRaw` mockado devolve o que a gente mandar, então sem interpretar o
+ *  filtro o teste passaria com a consulta certa e com a errada. */
+function bancoFake(canais: string[], solicitacoes: Array<{ pnid: string; status: string }>) {
+  return jest.fn((partes: TemplateStringsArray) => {
+    const sql = Array.from(partes).join('');
+    const ladoDasSolicitacoes = sql.split(/\bUNION\b/i)[1] ?? '';
+    const lista = /status\s+IN\s*\(([^)]*)\)/i.exec(ladoDasSolicitacoes);
+    const aceitos = lista ? lista[1].split(',').map((s) => s.trim().replace(/'/g, '')) : null;
+    const donos = solicitacoes
+      .filter((s) => (aceitos === null ? true : aceitos.includes(s.status)))
+      .map((s) => s.pnid);
+    return Promise.resolve(
+      [...new Set([...canais, ...donos])].map((phone_number_id) => ({ phone_number_id })),
+    );
+  });
+}
+
 describe('ReconciliacaoService.orfaos', () => {
   it('aponta número que está na Meta e não tem dono aqui', async () => {
     const prisma = {
@@ -35,6 +55,34 @@ describe('ReconciliacaoService.orfaos', () => {
     const meta = { listarNumeros: jest.fn().mockResolvedValue({ ok: true, ids: ['PN2'] }) } as any;
     const s = new ReconciliacaoService(prisma, CFG, meta);
     expect(await s.orfaos()).toEqual([{ phoneNumberId: 'PN2', motivo: 'sem dono no banco' }]);
+  });
+
+  it('não confunde solicitação viva com órfão nem some com a cancelada', async () => {
+    // PN2 está numa solicitação CANCELADA (a Meta aceitou o número, o fluxo
+    // não completou: vaga ocupada sem dono) e PN3 numa solicitação VIVA (o
+    // cliente está digitando o código agora). Sem o filtro de status na
+    // consulta, PN2 conta como "tem dono" e desaparece — que é justamente o
+    // número que a ferramenta existe para achar.
+    const prisma = {
+      $queryRaw: bancoFake(['PN1'], [
+        { pnid: 'PN2', status: 'cancelada' },
+        { pnid: 'PN3', status: 'aguardando_codigo' },
+      ]),
+    } as any;
+    const meta = {
+      listarNumeros: jest.fn().mockResolvedValue({ ok: true, ids: ['PN1', 'PN2', 'PN3'] }),
+    } as any;
+    const s = new ReconciliacaoService(prisma, CFG, meta);
+    expect(await s.orfaos()).toEqual([{ phoneNumberId: 'PN2', motivo: 'sem dono no banco' }]);
+  });
+
+  it('aponta também a solicitação que falhou com o número já aceito pela Meta', async () => {
+    const prisma = {
+      $queryRaw: bancoFake([], [{ pnid: 'PN9', status: 'falhou' }]),
+    } as any;
+    const meta = { listarNumeros: jest.fn().mockResolvedValue({ ok: true, ids: ['PN9'] }) } as any;
+    const s = new ReconciliacaoService(prisma, CFG, meta);
+    expect(await s.orfaos()).toEqual([{ phoneNumberId: 'PN9', motivo: 'sem dono no banco' }]);
   });
 
   it('devolve lista vazia e registra aviso quando não consegue listar a WABA na Meta', async () => {

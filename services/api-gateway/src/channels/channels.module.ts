@@ -10,6 +10,84 @@ import { ReconciliacaoService } from './assisted/reconciliacao.service';
 
 const logger = new Logger('ChannelsModule');
 
+/** Timeout de cada chamada à Graph API, pelo ConfigService (nunca
+ *  `process.env` direto no meio do código). Valor ausente OU inválido cai no
+ *  default do próprio client: `parseInt('abc')` é NaN, e `setTimeout(NaN)`
+ *  dispara na hora — toda chamada à Meta morreria como "tempo esgotado". */
+export function timeoutDaMeta(config: ConfigService): number | undefined {
+  const ms = parseInt(String(config.get<string>('META_HTTP_TIMEOUT_MS') ?? ''), 10);
+  return Number.isFinite(ms) && ms > 0 ? ms : undefined;
+}
+
+/** Configuração da conexão assistida, conferida no boot.
+ *
+ *  Duas variáveis mandam no fluxo inteiro: `ZAPLANE_WABA_ID` (a WABA da
+ *  plataforma) e `WHATSAPP_ACCESS_TOKEN` (o System User que fala com ela).
+ *  Faltando qualquer uma, o cliente recebia "Estamos com a capacidade cheia" —
+ *  mensagem enganosa que mascara falha de credencial — e o alerta de conta da
+ *  Meta voltava a ser espalhado para todos os canais (webhooks.service.ts
+ *  compara a WABA do alerta com `assisted.wabaId`).
+ *
+ *  A forma de falhar é diferente em cada caso, de propósito:
+ *
+ *  • `ZAPLANE_WABA_ID` ausente = feature DESLIGADA. Não derruba o boot: as
+ *    variáveis ainda não existem no Railway, e recusar aqui tiraria do ar a
+ *    API inteira — campanhas, webhooks de status, cobrança — de clientes
+ *    pagantes, por causa de uma feature nova que nenhum deles usa ainda. O
+ *    barulho fica no log e, principalmente, na porta: as rotas de conexão
+ *    assistida respondem 503 com texto honesto (ver garantirDisponivel em
+ *    assisted.controller.ts) em vez de mentir sobre capacidade.
+ *
+ *  • `ZAPLANE_WABA_ID` definido e token vazio = feature LIGADA pela metade.
+ *    Esse é o estado silencioso e perigoso, e ele só existe se o operador
+ *    tiver ligado a feature de propósito — então vale o mesmo remédio do
+ *    asaas.provider.ts (assertWebhookTokenIsSafe): recusa de boot em produção,
+ *    aviso alto fora dela. Como o gatilho é uma variável que hoje NÃO está
+ *    definida, este merge não tem como derrubar o deploy atual.
+ *
+ *  ANTES DE LIGAR EM PRODUÇÃO: definir `ZAPLANE_WABA_ID` e
+ *  `WHATSAPP_ACCESS_TOKEN` no MESMO deploy (nunca só a WABA). */
+export function conferirConfigAssistida(config: ConfigService): void {
+  // Via ConfigService, não process.env direto — é o padrão do resto do
+  // projeto (ver whatsapp.graphVersion abaixo) e passa pelo fallback '' já
+  // declarado em configuration.ts.
+  const wabaId = config.get<string>('assisted.wabaId') || '';
+  const token = config.get<string>('whatsapp.accessToken') || '';
+
+  if (!wabaId) {
+    logger.error(
+      'ZAPLANE_WABA_ID vazio — CONEXÃO ASSISTIDA DESLIGADA: as rotas /channels/assisted ' +
+        'respondem 503 e o roteamento de alertas da Meta não distingue a WABA da plataforma. ' +
+        'Defina ZAPLANE_WABA_ID e WHATSAPP_ACCESS_TOKEN juntos para ligar.',
+    );
+    return;
+  }
+  if (token) return;
+
+  const mensagem =
+    '[CONFIG] ZAPLANE_WABA_ID está definido (conexão assistida LIGADA) mas WHATSAPP_ACCESS_TOKEN ' +
+    'está vazio: toda chamada à Graph API para adicionar/verificar/registrar número falha por ' +
+    'autenticação e o cliente recebe "capacidade cheia", que é mentira.';
+  if (config.get<string>('env') === 'production') {
+    throw new Error(`${mensagem} Recusando iniciar em produção.`);
+  }
+  logger.error(
+    `${mensagem} Permitido em ambiente "${config.get<string>('env') ?? 'development'}" apenas ` +
+      'para desenvolvimento — NUNCA suba assim para produção.',
+  );
+}
+
+/** Fábrica do client da Meta. Função nomeada e exportada (em vez de um lambda
+ *  dentro do @Module) só para o boot poder ser testado sem levantar o Nest. */
+export function criarMetaNumerosClient(config: ConfigService): MetaNumerosClient {
+  conferirConfigAssistida(config);
+  return new MetaNumerosClient(
+    config.get<string>('whatsapp.graphVersion')!,
+    config.get<string>('whatsapp.accessToken') || '',
+    timeoutDaMeta(config),
+  );
+}
+
 @Module({
   imports: [TemplatesModule],
   controllers: [ChannelsController, AssistedController],
@@ -20,25 +98,7 @@ const logger = new Logger('ChannelsModule');
     {
       provide: MetaNumerosClient,
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
-        // Via ConfigService, não process.env direto — é o padrão do resto do
-        // projeto (ver whatsapp.graphVersion abaixo) e passa pelo fallback
-        // '' já declarado em configuration.ts.
-        const token = config.get<string>('whatsapp.accessToken') || '';
-        if (!token) {
-          // Falha visível, não silenciosa: sem token o client chama a Graph
-          // API com "Authorization: Bearer " vazio — TODA chamada falha por
-          // autenticação, e o primeiro sintoma que o cliente vê na conexão
-          // assistida é "capacidade cheia" (contarNumeros volta !ok, tratado
-          // como capacidade esgotada). Sem este log, o operador não tem
-          // pista nenhuma de que a causa real é credencial ausente.
-          logger.error(
-            'WHATSAPP_ACCESS_TOKEN vazio — a conexão assistida não vai funcionar ' +
-              '(toda chamada à Graph API para adicionar/verificar/registrar número falhará por autenticação).',
-          );
-        }
-        return new MetaNumerosClient(config.get<string>('whatsapp.graphVersion')!, token);
-      },
+      useFactory: criarMetaNumerosClient,
     },
   ],
 })
