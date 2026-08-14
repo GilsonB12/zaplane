@@ -81,7 +81,9 @@ export class AssistedService {
     }
   }
 
-  /** Solicitação em andamento — a tela abre direto no passo do código. */
+  /** Solicitação em andamento — é o que a tela usa para retomar de onde parou.
+   *  Só devolve status VIVO (`criando` ou `aguardando_codigo`); os demais já
+   *  não são retomáveis e viram `solicitacao: null`. */
   async atual(orgId: string) {
     const r = await this.prisma.channelConnectionRequest.findFirst({
       where: { organizationId: orgId, status: { in: VIVOS } },
@@ -96,6 +98,12 @@ export class AssistedService {
         nomeExibicao: r.displayName,
         tentativasRestantes: MAX_TENTATIVAS_CODIGO - r.codeAttempts,
         podeReenviarEm: this.segundosParaReenvio(r.lastCodeSentAt),
+        // Booleano derivado de `code_verified_at`: a Meta já aceitou o código e
+        // só o registro ficou faltando (ver verificar()). Sem isso a tela pede
+        // de novo um código de 6 dígitos que o servidor vai ignorar — o cliente
+        // digita qualquer coisa sem entender. A data em si não sai daqui: à tela
+        // interessa apenas se ainda há código a digitar.
+        codigoJaVerificado: r.codeVerifiedAt !== null,
       },
     };
   }

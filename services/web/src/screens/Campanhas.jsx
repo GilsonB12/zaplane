@@ -15,7 +15,7 @@ import {
 } from "../api/endpoints.js";
 import { extrairVariaveis, contextoDaVariavel, preencherCorpo } from "../utils/template.js";
 import { formatBRL } from "../utils/money.js";
-import { mensagem402 } from "../utils/billing.js";
+import { mensagemErro } from "../utils/erros.js";
 
 // Taxa Zaplane por mensagem entregue, POR CATEGORIA (espelha
 // billing.usagePriceByCategory no gateway). Utility custa muito menos na Meta,
@@ -195,7 +195,10 @@ export function NovaCampanha({ setScreen, openCampaign }) {
       });
       openCampaign(r.campaignId);
     } catch (e) {
-      setErroCriacao(mensagem402(e) || e.message || "Falha ao criar campanha.");
+      // Cobre saldo (402), cota diária de destinatários (403), rate limit (429)
+      // e serviço fora do ar (503) — cada um com o texto certo, nenhum com o
+      // corpo cru da resposta. Ver utils/erros.js.
+      setErroCriacao(mensagemErro(e, "Falha ao criar campanha."));
     }
   }
 
