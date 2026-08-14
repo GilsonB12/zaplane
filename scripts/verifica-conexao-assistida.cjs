@@ -24,6 +24,18 @@ const check = (nome, cond, detalhe = '') => {
   console.log(`  ${cond ? 'PASS ' : 'FALHA'} | ${nome}${detalhe ? ' — ' + detalhe : ''}`);
 };
 
+// Confere não só que o INSERT falhou, mas que falhou pela violação de
+// unicidade esperada (code 23505) e pelo índice esperado (constraint). Sem
+// isso, uma checagem continuaria dizendo PASS mesmo que o índice em questão
+// fosse removido — bastaria o INSERT falhar por outro motivo (NOT NULL, FK,
+// etc.) para mascarar a ausência do invariante real.
+const violacaoEsperada = (erro, indice) => {
+  if (!erro) return false;
+  if (erro.code !== '23505') return false;
+  if (erro.constraint !== indice) return false;
+  return true;
+};
+
 (async () => {
   const c = new Client({ connectionString: process.env.PGCONN, ssl: false });
   await c.connect();
@@ -61,7 +73,8 @@ const check = (nome, cond, detalhe = '') => {
         VALUES ($1,'W','enc','HASH2','85','8888','Loja 2','aguardando_codigo')`, [org]);
     } catch (e) { erro = e; }
     await c.query('ROLLBACK TO SAVEPOINT sp1');
-    check('só uma solicitação viva por organização', !!erro);
+    check('só uma solicitação viva por organização', violacaoEsperada(erro, 'idx_ccr_org_viva'),
+      erro && !violacaoEsperada(erro, 'idx_ccr_org_viva') ? `code=${erro.code} constraint=${erro.constraint}` : '');
 
     const org2 = (await c.query(
       `INSERT INTO organizations (name, slug) VALUES ('T2','t2-${Date.now()}') RETURNING id`)).rows[0].id;
@@ -73,7 +86,8 @@ const check = (nome, cond, detalhe = '') => {
         VALUES ($1,'W','enc','HASH','85','9999','Outra','aguardando_codigo')`, [org2]);
     } catch (e) { erro = e; }
     await c.query('ROLLBACK TO SAVEPOINT sp2');
-    check('o mesmo número não vive em duas organizações', !!erro);
+    check('o mesmo número não vive em duas organizações', violacaoEsperada(erro, 'idx_ccr_phone_viva'),
+      erro && !violacaoEsperada(erro, 'idx_ccr_phone_viva') ? `code=${erro.code} constraint=${erro.constraint}` : '');
 
     // O INSERT abaixo fica em SAVEPOINT + try/catch LOCAL: se ele falhar, a
     // checagem seguinte (phone_number_id único — a mais importante) não pode
@@ -98,7 +112,8 @@ const check = (nome, cond, detalhe = '') => {
         VALUES ($1,'B','PN1','W','','assisted')`, [org2]);
     } catch (e) { erro = e; }
     await c.query('ROLLBACK TO SAVEPOINT sp4');
-    check('phone_number_id é único globalmente', !!erro);
+    check('phone_number_id é único globalmente', violacaoEsperada(erro, 'idx_channels_pnid_global'),
+      erro && !violacaoEsperada(erro, 'idx_channels_pnid_global') ? `code=${erro.code} constraint=${erro.constraint}` : '');
   } catch (e) {
     fail++; console.log('  FALHA | erro:', e.message);
   } finally {
