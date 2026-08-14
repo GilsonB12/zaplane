@@ -29,6 +29,30 @@ export class AssistedService {
     return this.config.get<any>('assisted');
   }
 
+  /** Grava um evento em `audit_logs`. `resource_id` é sempre o HASH do
+   *  telefone, nunca o número em claro — mesmo padrão de
+   *  privacy.service.ts. O código numérico da Meta (quando houver) vai em
+   *  `metadata`: é o rastro que ERROS_CONEXAO esconde do cliente de propósito.
+   *
+   *  Falha ao gravar NUNCA pode derrubar o fluxo do cliente: em sms_sent e
+   *  registered a Meta já consumiu a vaga do número antes desta chamada —
+   *  se a exceção subisse, o cliente veria erro numa operação que na
+   *  verdade deu certo, tentaria de novo, e queimaria outra vaga (que não
+   *  volta por API). Por isso a falha vira só um log de erro bem visível. */
+  private async auditar(
+    orgId: string, userId: string | null, acao: string, hash: string, metadata: any = {},
+  ) {
+    try {
+      await this.prisma.$executeRaw`
+        INSERT INTO audit_logs (organization_id, actor_user_id, action, resource_type, resource_id, metadata)
+        VALUES (${orgId}::uuid, ${userId}::uuid, ${acao}, 'channel_connection', ${hash}, ${JSON.stringify(metadata)}::jsonb)`;
+    } catch (e) {
+      this.logger.error(
+        `falha ao gravar auditoria (ação ${acao}, hash ${hash}): ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
   /** Solicitação em andamento — a tela abre direto no passo do código. */
   async atual(orgId: string) {
     const r = await this.prisma.channelConnectionRequest.findFirst({
@@ -164,6 +188,7 @@ export class AssistedService {
       }
       throw e;
     }
+    await this.auditar(orgId, userId, 'channel.connect.requested', hash);
 
     const add = await this.meta.adicionarNumero(cfg.wabaId, tel, nome);
     if (!add.ok) {
@@ -200,6 +225,7 @@ export class AssistedService {
         lastCodeSentAt: new Date(),
       },
     });
+    await this.auditar(orgId, userId, 'channel.connect.sms_sent', hash);
     return { id: req.id, numeroMascarado: mascarar(tel.nacional.slice(0, 2), tel.ultimos4) };
   }
 
@@ -238,6 +264,9 @@ export class AssistedService {
           codeAttempts: tentativas,
           ...(queimou ? { status: 'falhou', errorCode: 'codigo_esgotado' } : {}),
         },
+      });
+      await this.auditar(orgId, req.createdBy, 'channel.connect.verify_failed', req.phoneHash, {
+        tentativas, codigoMeta: v.codigo,
       });
       throw new BadRequestException(
         queimou ? 'Tentativas esgotadas. Recomece a conexão.' : codigoIncorreto(MAX_TENTATIVAS_CODIGO - tentativas),
@@ -281,6 +310,7 @@ export class AssistedService {
       where: { id: req.id },
       data: { status: 'concluida', channelId: canal.id },
     });
+    await this.auditar(orgId, req.createdBy, 'channel.connect.registered', req.phoneHash, { canalId: canal.id });
     return { canalId: canal.id };
   }
 
@@ -292,6 +322,7 @@ export class AssistedService {
     });
     // A vaga na Meta NÃO volta por API — fica para a baixa manual do operador.
     this.logger.warn(`Conexão cancelada; número ${req.phoneNumberId} segue ocupando vaga na WABA ${req.wabaId}`);
+    await this.auditar(orgId, req.createdBy, 'channel.connect.cancelled', req.phoneHash);
     return { ok: true };
   }
 

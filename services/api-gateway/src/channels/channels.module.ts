@@ -6,6 +6,7 @@ import { ChannelsController } from './channels.controller';
 import { AssistedService } from './assisted/assisted.service';
 import { AssistedController } from './assisted/assisted.controller';
 import { MetaNumerosClient } from './assisted/meta-numeros.client';
+import { ReconciliacaoService } from './assisted/reconciliacao.service';
 
 const logger = new Logger('ChannelsModule');
 
@@ -15,6 +16,7 @@ const logger = new Logger('ChannelsModule');
   providers: [
     ChannelsService,
     AssistedService,
+    ReconciliacaoService,
     {
       provide: MetaNumerosClient,
       inject: [ConfigService],

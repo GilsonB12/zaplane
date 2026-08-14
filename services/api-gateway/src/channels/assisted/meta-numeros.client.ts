@@ -79,6 +79,14 @@ export class MetaNumerosClient {
     return { ok: true, total: (r.body?.data ?? []).length };
   }
 
+  /** Lista os IDs de todos os números atualmente na WABA — usado pela
+   *  reconciliação para achar números sem dono no banco (spec §8). */
+  async listarNumeros(wabaId: string): Promise<{ ok: true; ids: string[] } | Falha> {
+    const r = await this.chamar(`${wabaId}/phone_numbers?fields=id`, 'GET');
+    if (r.status >= 400) return falha(r.body);
+    return { ok: true, ids: (r.body?.data ?? []).map((x: any) => String(x.id)) };
+  }
+
   /** Obrigatório por WABA: sem isso o número envia e NENHUM status volta. */
   async inscreverWebhook(wabaId: string): Promise<{ ok: true } | Falha> {
     const r = await this.chamar(`${wabaId}/subscribed_apps`, 'POST', new URLSearchParams());
