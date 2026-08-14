@@ -8,6 +8,46 @@ const BRAND = "#0F8C5A";
 const INPUT =
   "w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-base outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 sm:py-2 sm:text-sm";
 
+// A solicitação some do lado do servidor em dois casos: expirou/foi cancelada
+// (o buscarViva() do backend responde 404 "Conexão não encontrada") ou
+// esgotou as 5 tentativas de código (a própria 5ª resposta já vem com essa
+// mensagem, e a solicitação vira 'falhou' — sai da lista de estados vivos).
+// Em ambos, insistir nela é beco sem saída: o jeito certo é o wizard voltar
+// sozinho para o início.
+function conexaoSumiu(e) {
+  if (e?.status === 404) return true;
+  const msg = e?.body?.message;
+  return typeof msg === "string" && /tentativas esgotadas/i.test(msg);
+}
+
+// Rede de segurança: se a validação do backend mudar e passar a devolver um
+// array de mensagens técnicas (padrão do class-validator, em inglês), nunca
+// jogamos isso cru na tela — cai numa mensagem genérica em português.
+function mensagemErro(e) {
+  const msg = e?.body?.message;
+  if (Array.isArray(msg)) return "Não foi possível concluir. Confira os dados informados.";
+  if (typeof msg === "string" && msg.trim()) return msg;
+  return e?.message || "Não foi possível concluir.";
+}
+
+// Mesmas faixas do IniciarConexaoDto do gateway (telefone: 10–20, nome: 2–60).
+// Validar aqui evita a viagem ao servidor só para voltar com um erro, e evita
+// que uma violação de tamanho apareça na tela como array em inglês.
+function validarTelefone(v) {
+  const t = (v || "").trim();
+  if (!t) return null; // campo vazio: o botão já fica desabilitado, sem precisar de aviso
+  if (t.length < 10) return "Informe o número com DDD.";
+  if (t.length > 20) return "Número muito longo — confira os dígitos.";
+  return null;
+}
+function validarNome(v) {
+  const t = (v || "").trim();
+  if (!t) return null;
+  if (t.length < 2) return "Informe o nome do negócio.";
+  if (t.length > 60) return "O nome do negócio deve ter no máximo 60 caracteres.";
+  return null;
+}
+
 export default function ConectarNumeroWizard({ nomeOrganizacao, onConectado }) {
   const [passo, setPasso] = useState("inicio");
   const [aceite, setAceite] = useState(false);
@@ -44,15 +84,30 @@ export default function ConectarNumeroWizard({ nomeOrganizacao, onConectado }) {
     try {
       return await fn();
     } catch (e) {
-      setErro(e.body?.message || e.message || "Não foi possível concluir.");
+      if (conexaoSumiu(e)) {
+        // A solicitação não existe mais no servidor — não há nada aqui para
+        // reenviar, verificar ou cancelar. Volta para o início já explicando
+        // o motivo, em vez de deixar o usuário preso num passo sem saída.
+        setReq(null);
+        setCodigo("");
+        setPasso("inicio");
+        setErro("Esta conexão expirou. Comece novamente.");
+        return null;
+      }
+      setErro(mensagemErro(e));
       return null;
     } finally {
       setOcupado(false);
     }
   }
 
-  const enviar = () =>
-    executar(async () => {
+  const enviar = () => {
+    const msg = validarTelefone(telefone) || validarNome(nome);
+    if (msg) {
+      setErro(msg);
+      return;
+    }
+    return executar(async () => {
       const r = await iniciarConexao({
         telefone, nomeExibicao: nome, aceitouPreRequisito: aceite,
       });
@@ -60,6 +115,7 @@ export default function ConectarNumeroWizard({ nomeOrganizacao, onConectado }) {
       setEspera(60);
       setPasso("codigo");
     });
+  };
 
   const confirmar = () =>
     executar(async () => {
@@ -67,6 +123,27 @@ export default function ConectarNumeroWizard({ nomeOrganizacao, onConectado }) {
       setPasso("pronto");
       onConectado?.();
     });
+
+  // Cancelar é a saída de emergência do passo "código" — precisa funcionar
+  // mesmo que o servidor já não tenha mais a solicitação (ex.: expirou depois
+  // da 5ª tentativa errada). Por isso NÃO usa executar(): o estado local é
+  // resetado sempre, dentro do finally, mesmo se a chamada à API falhar.
+  const cancelar = async () => {
+    setErro(null);
+    setOcupado(true);
+    try {
+      if (req?.id) await cancelarConexao(req.id);
+    } catch {
+      // Se a solicitação já não existe no servidor, o objetivo do usuário —
+      // recomeçar — já está satisfeito. Insistir em mostrar erro é hostil.
+    } finally {
+      setOcupado(false);
+      setReq(null);
+      setCodigo("");
+      setErro(null);
+      setPasso("inicio");
+    }
+  };
 
   const caixa = "rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900";
 
@@ -79,8 +156,13 @@ export default function ConectarNumeroWizard({ nomeOrganizacao, onConectado }) {
         <p className="mt-1 text-[13px] text-zinc-500 dark:text-zinc-400">
           Para disparar campanhas, conecte um número. Leva cerca de 3 minutos.
         </p>
+        {erro && (
+          <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-[12px] text-red-700 dark:bg-red-500/10 dark:text-red-300">
+            {erro}
+          </div>
+        )}
         <button
-          onClick={() => setPasso("prerequisito")}
+          onClick={() => { setErro(null); setPasso("prerequisito"); }}
           className="mt-4 inline-flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-white sm:py-2"
           style={{ backgroundColor: BRAND }}
         >
@@ -130,27 +212,38 @@ export default function ConectarNumeroWizard({ nomeOrganizacao, onConectado }) {
   }
 
   if (passo === "dados") {
+    const msgTelefone = validarTelefone(telefone);
+    const msgNome = validarNome(nome);
+    const dadosValidos = !msgTelefone && !msgNome && telefone.trim() && nome.trim();
     return (
       <div className={caixa}>
         <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Dados do número</h3>
         <div className="mt-3 space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="rounded-xl border border-zinc-200 px-3 py-2.5 text-sm text-zinc-500 dark:border-zinc-800 sm:py-2">
-              +55
-            </span>
-            <input className={INPUT} placeholder="(85) 99999-9999" value={telefone}
-              onChange={(e) => setTelefone(e.target.value)} />
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-xl border border-zinc-200 px-3 py-2.5 text-sm text-zinc-500 dark:border-zinc-800 sm:py-2">
+                +55
+              </span>
+              <input className={INPUT} inputMode="tel" placeholder="(85) 99999-9999" value={telefone}
+                onChange={(e) => setTelefone(e.target.value)} />
+            </div>
+            {msgTelefone && (
+              <p className="mt-1.5 text-[12px] text-red-600 dark:text-red-400">{msgTelefone}</p>
+            )}
           </div>
           <div>
             <input className={INPUT} placeholder="Nome do negócio" value={nome}
               onChange={(e) => setNome(e.target.value)} />
+            {msgNome && (
+              <p className="mt-1.5 text-[12px] text-red-600 dark:text-red-400">{msgNome}</p>
+            )}
             <p className="mt-1.5 text-[12px] leading-snug text-zinc-500 dark:text-zinc-400">
               É este nome que aparece para quem recebe. A Meta analisa em algumas horas —
               <strong> até lá, o destinatário vê o número</strong>.
             </p>
           </div>
           {erro && <div className="rounded-lg bg-red-50 px-3 py-2 text-[12px] text-red-700 dark:bg-red-500/10 dark:text-red-300">{erro}</div>}
-          <button disabled={ocupado || !telefone || nome.trim().length < 2} onClick={enviar}
+          <button disabled={ocupado || !dadosValidos} onClick={enviar}
             className="rounded-xl px-3.5 py-2.5 text-sm font-semibold text-white disabled:opacity-40 sm:py-2"
             style={{ backgroundColor: BRAND }}>
             {ocupado ? "Enviando…" : "Enviar código por SMS"}
@@ -182,14 +275,13 @@ export default function ConectarNumeroWizard({ nomeOrganizacao, onConectado }) {
             className="text-[13px] font-medium text-zinc-500 disabled:opacity-40 hover:underline dark:text-zinc-400">
             {espera > 0 ? `Reenviar em ${espera}s` : "Reenviar código"}
           </button>
-          <button disabled={ocupado}
+          <button disabled={espera > 0 || ocupado}
             onClick={() => executar(async () => { await reenviarCodigo(req.id, "VOICE"); setEspera(60); })}
-            className="text-[13px] font-medium text-zinc-500 hover:underline dark:text-zinc-400">
+            className="text-[13px] font-medium text-zinc-500 disabled:opacity-40 hover:underline dark:text-zinc-400">
             Receber por ligação
           </button>
-          <button
-            onClick={() => executar(async () => { await cancelarConexao(req.id); setPasso("inicio"); setReq(null); })}
-            className="text-[13px] text-zinc-400 hover:underline">
+          <button disabled={ocupado} onClick={cancelar}
+            className="text-[13px] text-zinc-400 disabled:opacity-40 hover:underline">
             Cancelar e recomeçar
           </button>
         </div>
