@@ -10,6 +10,13 @@ const OPT_OUT_KEYWORDS = ['parar', 'sair', 'stop', 'cancelar', 'descadastrar', '
 // cache em memória do secret+canal por phone_number_id (evita decifrar/consultar a
 // cada evento) — TTL 5 min, invalidação perfeita não é requisito (o TTL cobre
 // rotação/edição do secret e troca de dono do número).
+import {
+  ClasseErroMeta,
+  alertaLegivel,
+  bloqueiaCanal,
+  classificarErroMeta,
+} from './meta-error-codes';
+
 const CHANNEL_SECRET_TTL_MS = 5 * 60 * 1000;
 // Cache NEGATIVO: phone_number_id que não resolve para canal nenhum. Sem ele,
 // cada id inexistente vira uma consulta ao Postgres a cada requisição — e como
@@ -262,6 +269,23 @@ export class WebhooksService {
     if (status.status === 'sent') { data.sentAt = now; }
     if (status.status === 'failed') {
       data.errorDetail = JSON.stringify(status.errors ?? {});
+
+      // A Meta reprova envio por dois caminhos. O dispatcher classifica o erro
+      // SÍNCRONO (o POST já volta com erro). Este aqui é o ASSÍNCRONO: a
+      // chamada devolveu 200 com wamid e o erro chegou depois, por webhook.
+      // Sem classificar aqui, um problema do CANAL (cartão recusado, moeda não
+      // configurada, token vencido) marcaria a fila inteira como falha
+      // definitiva, uma mensagem por vez, sem nunca pausar o canal.
+      const erro = (status.errors ?? [])[0];
+      const classe = classificarErroMeta(erro?.code);
+      if (bloqueiaCanal(classe)) {
+        const requeued = await this.pausarCanalPorErro(
+          channelId, msg, erro?.code, erro?.error_data?.details ?? erro?.message ?? null, classe,
+        );
+        // a mensagem voltou para a fila: não é falha dela, é do canal
+        if (requeued) return;
+      }
+
       if (msg.status !== 'failed') counter.failedCount = { increment: 1 };
     }
     await this.prisma.outboundMessage.update({ where: { id: msg.id }, data });
@@ -278,6 +302,80 @@ export class WebhooksService {
     if (pricing && typeof pricing.billable === 'boolean' && !msg.billingRecordedAt) {
       await this.recordPricing(pricing, msg, organizationId);
     }
+  }
+
+  /**
+   * Erro de CANAL chegando por webhook: pausa o canal e devolve a mensagem à
+   * fila em vez de queimá-la.
+   *
+   * Espelha o pausarCanal do dispatcher (worker.go). A diferença é o gatilho:
+   * lá o erro veio na resposta do envio; aqui a Meta aceitou a mensagem e
+   * reprovou depois. O efeito precisa ser o mesmo, senão a fila inteira do
+   * cliente vira falha definitiva enquanto o canal segue ativo tentando.
+   *
+   * Devolve true quando a mensagem foi reenfileirada (o chamador então não a
+   * marca como falha).
+   */
+  private async pausarCanalPorErro(
+    channelId: string,
+    msg: { id: string; attempts: number; maxAttempts: number },
+    code: number | undefined,
+    detalhe: string | null,
+    classe: ClasseErroMeta,
+  ): Promise<boolean> {
+    // limite de vazão costuma liberar sozinho; problema de conta exige operador
+    const segundos = classe === 'ratelimit' ? 15 * 60 : 30 * 60;
+    const ate = new Date(Date.now() + segundos * 1000);
+    const motivo = `${classe}:${code ?? 'desconhecido'}`;
+
+    this.logger.warn(
+      `Canal ${channelId} PAUSADO por ${segundos}s — erro ${code} recebido por webhook: ${detalhe ?? 'sem detalhe'}`,
+    );
+
+    await this.prisma.whatsappChannel.update({
+      where: { id: channelId },
+      data: {
+        pausedUntil: ate,
+        pausedReason: motivo,
+        // só o erro de conta vira alerta no painel; vazão se resolve sozinha
+        ...(classe === 'conta'
+          ? {
+              alertSeverity: 'CRITICAL',
+              alertType: 'dispatcher_pause',
+              alertMessage: alertaLegivel(code ?? 0, detalhe),
+              alertAt: new Date(),
+            }
+          : {}),
+      },
+    });
+
+    // Tira da frente da fila as mensagens que já estão esperando neste canal —
+    // sem isso, cada poll do worker varre o índice só para descartá-las.
+    await this.prisma.outboundMessage.updateMany({
+      where: { channelId, status: 'queued', nextAttemptAt: { lt: ate } },
+      data: { nextAttemptAt: ate },
+    });
+
+    // Tentativas esgotadas: aí sim é falha, senão a mensagem circula para sempre.
+    if (msg.attempts >= msg.maxAttempts) return false;
+
+    await this.prisma.outboundMessage.update({
+      where: { id: msg.id },
+      data: {
+        status: 'queued',
+        nextAttemptAt: ate,
+        // não foi a mensagem que falhou: devolve a tentativa
+        attempts: Math.max(msg.attempts - 1, 0),
+        // o wamid antigo não vale mais; um reenvio gera outro
+        waMessageId: null,
+        sentAt: null,
+        errorCode: String(code ?? 'canal_bloqueado'),
+        errorDetail: detalhe,
+        lockedBy: null,
+        lockedAt: null,
+      },
+    });
+    return true;
   }
 
   // Grava billable/pricing_category/pricing_model em outbound_messages e,
