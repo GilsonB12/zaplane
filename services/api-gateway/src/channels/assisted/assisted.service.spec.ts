@@ -15,6 +15,12 @@ function montar(over: any = {}) {
       count: jest.fn().mockResolvedValue(0),
     },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
+    // usado pelo auditar() de AssistedService. Sem isso, as cinco chamadas de
+    // auditoria estouram "$executeRaw is not a function" em TODOS os testes
+    // (o try/catch de auditar() engole o erro, então nada quebra — mas isso
+    // some do log dos testes de auditoria abaixo, que precisam inspecionar
+    // as chamadas de verdade).
+    $executeRaw: jest.fn().mockResolvedValue(undefined),
     ...over.prisma,
   };
   const meta = {
@@ -156,7 +162,11 @@ describe('AssistedService.verificar', () => {
   const req = {
     id: 'REQ', organizationId: ORG, status: 'aguardando_codigo',
     phoneNumberId: 'PNID', codeAttempts: 0, registerPinEnc: null,
-    phoneE164Enc: 'x', displayName: 'Loja', wabaId: 'WABA', phoneLast4: '9999',
+    // phoneE164Enc é o número CIFRADO — nunca o número em claro. phoneHash é
+    // o HMAC que vai para audit_logs.resource_id (ver describe de auditoria
+    // abaixo); um valor fixo e reconhecível aqui ajuda a distinguir "gravou
+    // o hash certo" de "gravou qualquer string".
+    phoneE164Enc: 'x', phoneHash: 'HASH_FIXO_REQ', displayName: 'Loja', wabaId: 'WABA', phoneLast4: '9999',
   };
 
   it('nunca persiste o código de 6 dígitos', async () => {
@@ -229,6 +239,55 @@ describe('AssistedService.verificar', () => {
     await expect(svc.verificar(ORG, 'REQ', '123456')).rejects.toBeInstanceOf(BadRequestException);
     expect(meta.verificarCodigo).not.toHaveBeenCalled();
     expect(prisma.channelConnectionRequest.update).not.toHaveBeenCalled();
+  });
+
+  // Trilha de auditoria (audit_logs). $executeRaw é chamado como template tag
+  // — o mock recebe o array de trechos da query e os valores interpolados
+  // como argumentos SEPARADOS, na ordem em que aparecem no INSERT de
+  // auditar(): (strings, orgId, userId, acao, hash, metadataJson). Por isso
+  // as asserções abaixo indexam os argumentos da chamada, e não tentam casar
+  // por substring de SQL.
+  it('grava channel.connect.registered com o hash do telefone (nao com dado sensivel) e o canalId em metadata', async () => {
+    const { svc, prisma } = montar({
+      prisma: {
+        channelConnectionRequest: {
+          findFirst: jest.fn().mockResolvedValue(req),
+          create: jest.fn(),
+          update: jest.fn(async ({ data }: any) => data),
+        },
+        whatsappChannel: {
+          count: jest.fn(), findFirst: jest.fn(),
+          create: jest.fn().mockResolvedValue({ id: 'CANAL_XYZ' }),
+        },
+      },
+    });
+    await svc.verificar(ORG, 'REQ', '123456');
+    const chamadas = (prisma.$executeRaw as jest.Mock).mock.calls;
+    const registrado = chamadas.find((args: any[]) => args[3] === 'channel.connect.registered');
+    expect(registrado).toBeDefined();
+    // resource_id (4º valor interpolado) é o HASH, nunca o telefone/dado sensível
+    expect(registrado![4]).toBe('HASH_FIXO_REQ');
+    expect(JSON.parse(registrado![5])).toEqual({ canalId: 'CANAL_XYZ' });
+  });
+
+  it('grava channel.connect.verify_failed com o hash do telefone, as tentativas e o codigo numerico da Meta', async () => {
+    const { svc, prisma } = montar({
+      prisma: { channelConnectionRequest: {
+        findFirst: jest.fn().mockResolvedValue(req),
+        create: jest.fn(), update: jest.fn(async ({ data }: any) => data),
+      } },
+      meta: { verificarCodigo: jest.fn().mockResolvedValue({ ok: false, codigo: 136008, detalhe: 'x' }) },
+    });
+    await svc.verificar(ORG, 'REQ', '000000').catch(() => {});
+    const chamadas = (prisma.$executeRaw as jest.Mock).mock.calls;
+    const falhou = chamadas.find((args: any[]) => args[3] === 'channel.connect.verify_failed');
+    expect(falhou).toBeDefined();
+    // resource_id (4º valor interpolado) é o HASH, nunca o telefone/dado sensível
+    expect(falhou![4]).toBe('HASH_FIXO_REQ');
+    // o código do catálogo (ERROS_CONEXAO) esconde o código da Meta do
+    // cliente de propósito — é exatamente esse código que tem que sobreviver
+    // aqui, junto da tentativa consumida.
+    expect(JSON.parse(falhou![5])).toEqual({ tentativas: 1, codigoMeta: 136008 });
   });
 });
 
