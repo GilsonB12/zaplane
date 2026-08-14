@@ -398,15 +398,38 @@ ORG_MAX_CHANNELS=1
 ORG_DAILY_MESSAGE_QUOTA=200
 ```
 
-- [ ] **Step 6: Verificar que compila**
+- [ ] **Step 6: Documentar o token de fallback do dispatcher**
+
+⚠️ **Sem este passo o canal assistido nasce quebrado.** O canal grava um
+sentinela em `access_token_enc` para não replicar o token mestre em cada linha;
+quem resolve o token de verdade é o `resolveToken` do dispatcher, pelo fallback
+de ambiente. Verificado em 14/08/2026: **`WHATSAPP_ACCESS_TOKEN` não está
+definida no serviço `zaplane-dispatcher` em produção.** Com ela vazia, o worker
+faz `MarkFailed(..., "no_token", ...)` e **toda** mensagem do canal assistido
+falha na hora — conecta com sucesso e não envia nada.
+
+Acrescentar em `services/dispatcher/.env.example`:
+
+```
+# Token de System User da Zaplane. OBRIGATÓRIO no modelo de conexão assistida:
+# os canais assistidos gravam um sentinela em access_token_enc (para não
+# replicar o token mestre por tenant) e dependem deste fallback. Vazio =
+# toda mensagem desses canais falha com "no_token".
+WHATSAPP_ACCESS_TOKEN=
+```
+
+E registrar no relatório da tarefa que a variável **precisa ser definida no
+Railway antes da T10** (o teste ponta a ponta falha sem ela).
+
+- [ ] **Step 7: Verificar que compila**
 
 Run: `cd services/api-gateway && npx tsc --noEmit -p tsconfig.json`
 Expected: sem saída
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add db/migrations/013_conexao_assistida.sql services/api-gateway/prisma/schema.prisma services/api-gateway/src/config/configuration.ts services/api-gateway/.env.example
+git add db/migrations/013_conexao_assistida.sql services/api-gateway/prisma/schema.prisma services/api-gateway/src/config/configuration.ts services/api-gateway/.env.example services/dispatcher/.env.example
 git commit -m "feat(db): tabela de solicitacoes de conexao assistida (013)
 
 Estado parcial da conexao vive em channel_connection_requests, nao em
