@@ -68,4 +68,16 @@ export default () => ({
     appSecret: process.env.ZAPLANE_FB_APP_SECRET || '',
     esConfigId: process.env.ZAPLANE_ES_CONFIG_ID || '',
   },
+  assisted: {
+    // WABA da Zaplane que recebe os números dos clientes
+    wabaId: process.env.ZAPLANE_WABA_ID || '',
+    // teto de números por WABA na Meta (2 sobe para 20 com empresa verificada)
+    phoneCap: parseInt(process.env.ZAPLANE_WABA_PHONE_CAP || '20', 10),
+    // canais ativos permitidos por organização
+    orgMaxChannels: parseInt(process.env.ORG_MAX_CHANNELS || '1', 10),
+    // Limite de mensagens é do PORTFÓLIO e compartilhado por todos os números
+    // (Meta, desde 07/10/2025). Sem cota por org, um cliente consome o pote de
+    // todos. Ver spec §2.
+    orgDailyQuota: parseInt(process.env.ORG_DAILY_MESSAGE_QUOTA || '200', 10),
+  },
 });

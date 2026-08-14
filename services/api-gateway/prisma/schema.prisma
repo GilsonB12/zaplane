@@ -22,12 +22,13 @@ model Organization {
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  users     User[]
-  contacts  Contact[]
-  channels  WhatsappChannel[]
-  lists     List[]
-  templates Template[]
-  campaigns Campaign[]
+  users              User[]
+  contacts           Contact[]
+  channels           WhatsappChannel[]
+  lists              List[]
+  templates          Template[]
+  campaigns          Campaign[]
+  connectionRequests ChannelConnectionRequest[]
 
   @@map("organizations")
 }
@@ -44,7 +45,8 @@ model User {
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization       Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  connectionRequests ChannelConnectionRequest[]
 
   @@unique([organizationId, email])
   @@map("users")
@@ -96,14 +98,63 @@ model WhatsappChannel {
   // não reserva mensagens deste canal
   pausedUntil     DateTime? @map("paused_until") @db.Timestamptz(6)
   pausedReason    String?   @map("paused_reason")
+  // PIN de 2 etapas do registro na Meta, cifrado (migração 013). Necessário
+  // para re-registrar ou desregistrar o número.
+  registerPinEnc  String?   @map("register_pin_enc")
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  campaigns    Campaign[]
+  organization       Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaigns          Campaign[]
+  connectionRequests ChannelConnectionRequest[]
 
   @@unique([organizationId, phoneNumberId])
+  // a vaga do número na Meta não volta por API (migração 013) — unicidade
+  // global inclusive para canais desconectados
+  @@unique([phoneNumberId], map: "idx_channels_pnid_global")
   @@map("whatsapp_channels")
+}
+
+// Conexão assistida (migração 013): o número do cliente passa a viver na WABA
+// da Zaplane. Esta tabela guarda o estado PARCIAL da conexão — nunca
+// whatsapp_channels, que o ClaimBatch do dispatcher lê sem filtrar status.
+model ChannelConnectionRequest {
+  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  createdBy      String? @map("created_by") @db.Uuid
+  wabaId         String  @map("waba_id")
+  // PII: número cifrado (AES-GCM) + HMAC para unicidade/cooldown sem expor
+  phoneE164Enc   String  @map("phone_e164_enc")
+  phoneHash      String  @map("phone_hash")
+  // DDD e 4 últimos em claro: o mínimo para a UI mascarar na retomada
+  // ((85) 9••••-••99) sem precisar decifrar o número
+  phoneDdd       String  @map("phone_ddd")
+  phoneLast4     String  @map("phone_last4")
+  displayName    String  @map("display_name")
+  phoneNumberId  String? @map("phone_number_id")
+  // PIN de 2 etapas gerado pelo servidor; nunca exibido ao cliente
+  registerPinEnc String? @map("register_pin_enc")
+  status         String  @default("criando")
+  codeRequests   Int     @default(0) @map("code_requests")
+  codeAttempts   Int     @default(0) @map("code_attempts")
+  lastCodeSentAt DateTime? @map("last_code_sent_at") @db.Timestamptz(6)
+  errorCode      String?   @map("error_code")
+  errorDetail    String?   @map("error_detail")
+  channelId      String?   @map("channel_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdByUser User?            @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  channel       WhatsappChannel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
+
+  // idx_ccr_org_viva (organization_id) e idx_ccr_phone_viva (phone_hash) são
+  // índices ÚNICOS PARCIAIS (WHERE status IN ('criando','aguardando_codigo'))
+  // — o Prisma Client não expressa predicado parcial em @@unique (mesma
+  // limitação documentada em WalletTransaction acima). O banco segue sendo a
+  // fonte de verdade; não adicionar @@unique aqui esperando reproduzi-los.
+  @@index([phoneHash, lastCodeSentAt], map: "idx_ccr_phone_recente")
+  @@map("channel_connection_requests")
 }
 
 model Contact {
