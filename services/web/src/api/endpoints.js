@@ -89,6 +89,13 @@ export const disconnectChannel = (id) => api.del(`/channels/${id}`);
 export const ackChannelPayment = (id, confirmado = true) =>
   api.post(`/channels/${id}/payment-ack`, { confirmado });
 
+/* ---- Conexão assistida (número do próprio cliente) ---- */
+export const conexaoAtual = () => api.get("/channels/assisted/current");
+export const iniciarConexao = (dto) => api.post("/channels/assisted", dto);
+export const reenviarCodigo = (id, metodo) => api.post(`/channels/assisted/${id}/resend`, { metodo });
+export const verificarCodigo = (id, codigo) => api.post(`/channels/assisted/${id}/verify`, { codigo });
+export const cancelarConexao = (id) => api.del(`/channels/assisted/${id}`);
+
 /* ---- Billing ---- */
 export const getBillingSummary = () => api.get("/billing/summary");
 export const getWallet = () => api.get("/billing/wallet");
