@@ -29,6 +29,13 @@ CREATE TABLE IF NOT EXISTS channel_connection_requests (
     code_requests     INTEGER NOT NULL DEFAULT 0,
     code_attempts     INTEGER NOT NULL DEFAULT 0,
     last_code_sent_at TIMESTAMPTZ,
+    -- Momento em que a Meta ACEITOU o código. Sem isso, uma falha transitória
+    -- no /register depois de um verify_code bem-sucedido deixa o cliente sem
+    -- saída: a única coisa que ele pode fazer é digitar o mesmo código de
+    -- novo, a Meta recusa ("número já verificado"), isso conta como código
+    -- errado e as 5 tentativas terminam a solicitação em 'falhou' — com a
+    -- vaga do número já consumida na WABA, e ela não volta por API.
+    code_verified_at  TIMESTAMPTZ,
     error_code        TEXT,
     error_detail      TEXT,
     channel_id        UUID REFERENCES whatsapp_channels(id) ON DELETE SET NULL,
@@ -38,6 +45,14 @@ CREATE TABLE IF NOT EXISTS channel_connection_requests (
 
 COMMENT ON TABLE channel_connection_requests IS
   'Conexão de número em andamento. O código de 6 dígitos NUNCA é gravado — só contadores e horários.';
+
+-- Idempotência: a tabela acima é criada com IF NOT EXISTS, então numa base que
+-- já tenha uma cópia anterior deste arquivo a coluna nova não nasceria.
+ALTER TABLE channel_connection_requests
+    ADD COLUMN IF NOT EXISTS code_verified_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN channel_connection_requests.code_verified_at IS
+  'Quando a Meta aceitou o código. Preenchida ANTES do /register: é o que permite a segunda tentativa pular direto para o registro em vez de reenviar um código que a Meta já não aceita.';
 
 -- no máximo uma solicitação viva por organização
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ccr_org_viva

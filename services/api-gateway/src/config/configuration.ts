@@ -94,5 +94,17 @@ export default () => ({
     // organização insistindo esgota as vagas de todo mundo em minutos — a
     // vaga não volta por API.
     maxConnectAttempts24h: parseInt(process.env.ORG_MAX_CONNECT_ATTEMPTS_24H || '5', 10),
+    // Teto de VAGAS QUEIMADAS por organização em 24h — solicitações que já
+    // chegaram a ter phone_number_id (a Meta aceitou o número, a vaga foi
+    // consumida) e não terminaram conectadas. É trava diferente da de cima:
+    // aquela conta TENTATIVAS, e uma tentativa que a Meta recusa não custa
+    // vaga nenhuma, enquanto uma vaga consumida não volta por API.
+    // Default 2 e não 5: a WABA inteira tem ZAPLANE_WABA_PHONE_CAP (~20)
+    // vagas para TODA a plataforma e ORG_MAX_CHANNELS é 1, então uma
+    // organização legítima precisa de exatamente uma. O 2 deixa margem para
+    // um percalço real (número digitado errado que a Meta aceitou, SMS que
+    // nunca chegou) e ainda assim limita o estrago diário de uma única
+    // organização a 10% da capacidade da plataforma, em vez de 25%.
+    maxBurnedSlots24h: parseInt(process.env.ORG_MAX_BURNED_SLOTS_24H || '2', 10),
   },
 });

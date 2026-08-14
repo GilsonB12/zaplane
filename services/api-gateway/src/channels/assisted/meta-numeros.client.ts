@@ -8,23 +8,79 @@ const falha = (b: any): Falha => ({
   detalhe: b?.error?.error_data?.details ?? b?.error?.message ?? 'erro desconhecido',
 });
 
+const BASE_GRAPH = 'https://graph.facebook.com/';
+
+/** Status sintético para falha de transporte (rede, timeout, resposta não-JSON).
+ *  Precisa ser >= 400: todo chamador decide por `status < 400`, então um 0 ou
+ *  um 200 aqui viraria "deu certo" para pedirCodigo/verificarCodigo/registrar. */
+const STATUS_TRANSPORTE = 599;
+const falhaDeTransporte = (motivo: string) => ({
+  status: STATUS_TRANSPORTE,
+  body: { error: { message: motivo } },
+});
+
+/** Teto de páginas ao varrer os números da WABA. Estourar significa não saber
+ *  quantos números existem — e essa contagem é a trava da capacidade, então o
+ *  estouro falha FECHADO (vira Falha) em vez de devolver um total menor. */
+const MAX_PAGINAS = 50;
+
 /** Chamadas da Meta para adicionar, verificar e registrar um número.
  *  Contrato verificado em produção — ver spec §4. O token vai SEMPRE por
  *  header: em query string ele vazaria para log de proxy e histórico. */
 @Injectable()
 export class MetaNumerosClient {
-  constructor(private readonly versao: string, private readonly token: string) {}
+  constructor(
+    private readonly versao: string,
+    private readonly token: string,
+    /** Timeout de cada chamada à Graph API. Configurável (META_HTTP_TIMEOUT_MS)
+     *  e injetável pelo provider — nunca fixo no código. */
+    private readonly timeoutMs = parseInt(process.env.META_HTTP_TIMEOUT_MS || '15000', 10),
+  ) {}
 
-  private async chamar(caminho: string, metodo: 'GET' | 'POST', corpo?: URLSearchParams) {
-    const r = await fetch(`https://graph.facebook.com/${this.versao}/${caminho}`, {
-      method: metodo,
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        ...(corpo ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
-      },
-      ...(corpo ? { body: corpo.toString() } : {}),
-    });
-    return { status: r.status, body: await r.json() };
+  private chamar(caminho: string, metodo: 'GET' | 'POST', corpo?: URLSearchParams) {
+    return this.chamarUrl(`${BASE_GRAPH}${this.versao}/${caminho}`, metodo, corpo);
+  }
+
+  /** Toda falha de transporte vira Falha normal do client, nunca exceção.
+   *  `fetch` sem timeout pendura a requisição do cliente até o socket morrer, e
+   *  `r.json()` estoura em qualquer resposta não-JSON (HTML de proxy, corpo
+   *  vazio) — os dois escapariam como 500 em inglês, deixando a solicitação
+   *  presa em 'criando', sem mensagem do catálogo e sem error_code. */
+  private async chamarUrl(
+    url: string,
+    metodo: 'GET' | 'POST',
+    corpo?: URLSearchParams,
+  ): Promise<{ status: number; body: any }> {
+    const abortador = new AbortController();
+    const relogio = setTimeout(() => abortador.abort(), this.timeoutMs);
+    try {
+      const r = await fetch(url, {
+        method: metodo,
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          ...(corpo ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
+        },
+        ...(corpo ? { body: corpo.toString() } : {}),
+        signal: abortador.signal,
+      });
+      // text() antes de JSON.parse: é o único jeito de sobreviver a um 200 com
+      // HTML no corpo, que é justamente o caso perigoso (o status sozinho diria
+      // "sucesso" para um registro que nunca aconteceu).
+      const texto = await r.text();
+      try {
+        return { status: r.status, body: texto ? JSON.parse(texto) : {} };
+      } catch {
+        return falhaDeTransporte('resposta inválida da Meta (não é JSON)');
+      }
+    } catch (e) {
+      const expirou = e instanceof Error && e.name === 'AbortError';
+      // mensagem fixa, sem o texto cru do erro: ele carrega a URL chamada.
+      return falhaDeTransporte(
+        expirou ? 'tempo esgotado ao falar com a Meta' : 'falha de rede ao falar com a Meta',
+      );
+    } finally {
+      clearTimeout(relogio);
+    }
   }
 
   /** Tenta o assinante com o nono dígito e cai na variante sem ele se a Meta
@@ -73,18 +129,41 @@ export class MetaNumerosClient {
     return r.status < 400 ? { ok: true } : falha(r.body);
   }
 
+  /** Varre TODAS as páginas de `{waba}/phone_numbers`.
+   *
+   *  Ler só a primeira página funciona por coincidência — a página padrão da
+   *  Graph API (25) é maior que o teto atual (ZAPLANE_WABA_PHONE_CAP=20). No
+   *  dia em que o teto subisse, `contarNumeros` viraria no-op silencioso e a
+   *  plataforma queimaria vagas achando que tem espaço. */
+  private async paginarNumeros(wabaId: string): Promise<{ ok: true; ids: string[] } | Falha> {
+    const ids: string[] = [];
+    let url: string | null = `${BASE_GRAPH}${this.versao}/${wabaId}/phone_numbers?fields=id&limit=100`;
+    let paginas = 0;
+    while (url) {
+      if (++paginas > MAX_PAGINAS) {
+        // falha FECHADO: um total parcial aqui é pior que erro nenhum — ele
+        // liberaria a adição de número numa WABA possivelmente lotada.
+        return { ok: false, codigo: null, detalhe: 'paginação da Graph API não terminou' };
+      }
+      const r = await this.chamarUrl(url, 'GET');
+      if (r.status >= 400) return falha(r.body);
+      for (const x of r.body?.data ?? []) ids.push(String(x.id));
+      const proxima = r.body?.paging?.next;
+      // `next` vem de resposta externa: só seguimos se for da própria Graph API.
+      url = typeof proxima === 'string' && proxima.startsWith(BASE_GRAPH) ? proxima : null;
+    }
+    return { ok: true, ids };
+  }
+
   async contarNumeros(wabaId: string): Promise<{ ok: true; total: number } | Falha> {
-    const r = await this.chamar(`${wabaId}/phone_numbers?fields=id`, 'GET');
-    if (r.status >= 400) return falha(r.body);
-    return { ok: true, total: (r.body?.data ?? []).length };
+    const r = await this.paginarNumeros(wabaId);
+    return r.ok ? { ok: true, total: r.ids.length } : r;
   }
 
   /** Lista os IDs de todos os números atualmente na WABA — usado pela
    *  reconciliação para achar números sem dono no banco (spec §8). */
   async listarNumeros(wabaId: string): Promise<{ ok: true; ids: string[] } | Falha> {
-    const r = await this.chamar(`${wabaId}/phone_numbers?fields=id`, 'GET');
-    if (r.status >= 400) return falha(r.body);
-    return { ok: true, ids: (r.body?.data ?? []).map((x: any) => String(x.id)) };
+    return this.paginarNumeros(wabaId);
   }
 
   /** Obrigatório por WABA: sem isso o número envia e NENHUM status volta. */

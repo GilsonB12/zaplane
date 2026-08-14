@@ -1,10 +1,14 @@
 import { BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AssistedService } from './assisted.service';
-import { phoneHash } from '../../common/crypto.util';
+import { encrypt, phoneHash } from '../../common/crypto.util';
 import { normalizarTelefoneBR } from './telefone';
+import { ERROS_CONEXAO } from './erros';
 
-const CFG = { wabaId: 'WABA', phoneCap: 20, orgMaxChannels: 1, orgDailyQuota: 200, maxConnectAttempts24h: 5 };
+const CFG = {
+  wabaId: 'WABA', phoneCap: 20, orgMaxChannels: 1, orgDailyQuota: 200,
+  maxConnectAttempts24h: 5, maxBurnedSlots24h: 2,
+};
 const ORG = '11111111-1111-1111-1111-111111111111';
 
 function montar(over: any = {}) {
@@ -23,6 +27,10 @@ function montar(over: any = {}) {
     // some do log dos testes de auditoria abaixo, que precisam inspecionar
     // as chamadas de verdade).
     $executeRaw: jest.fn().mockResolvedValue(undefined),
+    // code_verified_at é lida por SQL cru (a coluna da migração 013 ainda não
+    // está no model do Prisma). Array vazio = solicitação ainda não verificada,
+    // que é o caminho normal.
+    $queryRaw: jest.fn().mockResolvedValue([]),
     ...over.prisma,
   };
   const meta = {
@@ -42,6 +50,14 @@ const DTO = { telefone: '(85) 99999-9999', nomeExibicao: 'Loja do Zé', aceitouP
 // mesmo cálculo que iniciar() faz internamente (normalizarTelefoneBR + phoneHash)
 // — permite comparar resource_id por valor exato, não só "é uma string".
 const HASH_DTO = phoneHash(normalizarTelefoneBR(DTO.telefone).e164);
+
+/** Chamada de $executeRaw que grava code_verified_at + register_pin_enc.
+ *  $executeRaw é template tag: args[0] é o array de trechos de SQL. */
+function chamadaVerificado(prisma: any) {
+  const m = (prisma.$executeRaw as jest.Mock).mock;
+  const idx = m.calls.findIndex((c: any[]) => c[0].join('').includes('code_verified_at'));
+  return { idx, ordem: idx >= 0 ? m.invocationCallOrder[idx] : -1, args: m.calls[idx] };
+}
 
 describe('AssistedService.iniciar', () => {
   it('recusa sem o aceite do pré-requisito', async () => {
@@ -76,6 +92,43 @@ describe('AssistedService.iniciar', () => {
     expect(meta.adicionarNumero).not.toHaveBeenCalled();
   });
 
+  it('recusa quando a organização já queimou o teto de VAGAS em 24h, mesmo com tentativas sobrando', async () => {
+    // Tentativa e vaga são coisas diferentes: a vaga é consumida quando a Meta
+    // aceita o número (phone_number_id preenchido) e NÃO volta por API. Com 5
+    // tentativas e sem esta trava, uma única org queimaria 5 das ~20 vagas da
+    // plataforma por dia, todo dia.
+    const { svc, meta } = montar({
+      prisma: {
+        channelConnectionRequest: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn(),
+          update: jest.fn(),
+          // 1 tentativa no total (longe do teto de 5), mas 2 vagas queimadas
+          count: jest.fn(async ({ where }: any) => (where.phoneNumberId ? 2 : 1)),
+        },
+      },
+    });
+    await expect(svc.iniciar(ORG, 'U', DTO)).rejects.toThrow(ERROS_CONEXAO.capacidade);
+    expect(meta.contarNumeros).not.toHaveBeenCalled();
+    expect(meta.adicionarNumero).not.toHaveBeenCalled();
+  });
+
+  it('conta como vaga queimada só o que tem phone_number_id e não concluiu', async () => {
+    // a consulta da trava é o conserto inteiro: se ela contasse qualquer
+    // solicitação, uma org com tentativas recusadas pela Meta (que não custam
+    // vaga) ficaria travada sem motivo.
+    const { svc, prisma } = montar();
+    await svc.iniciar(ORG, 'U', DTO);
+    const filtros = (prisma.channelConnectionRequest.count as jest.Mock).mock.calls.map((c: any[]) => c[0].where);
+    const vagas = filtros.find((w: any) => w.phoneNumberId);
+    expect(vagas).toMatchObject({
+      organizationId: ORG,
+      phoneNumberId: { not: null },
+      status: { not: 'concluida' },
+    });
+    expect(vagas.createdAt.gte).toBeInstanceOf(Date);
+  });
+
   it('recusa quando a WABA está lotada — sem chamar a Meta para adicionar', async () => {
     const { svc, meta } = montar({ meta: { contarNumeros: jest.fn().mockResolvedValue({ ok: true, total: 20 }) } });
     await expect(svc.iniciar(ORG, 'U', DTO)).rejects.toThrow(/capacidade/i);
@@ -95,9 +148,12 @@ describe('AssistedService.iniciar', () => {
     erroLog.mockRestore();
   });
 
-  it('recusa número que já é de outra organização', async () => {
+  it('recusa número que já é de outra organização com 400 e a mensagem do catálogo', async () => {
     // whatsapp_channels não tem phone_hash — a checagem é contra as
     // solicitações concluídas (channelConnectionRequest), não whatsappChannel.
+    // O status é 400, o MESMO do ramo P2002: um 409 com o texto de
+    // numero_indisponivel só poderia significar "outra organização está
+    // conectando este número agora mesmo".
     const { svc, meta } = montar({
       prisma: {
         channelConnectionRequest: {
@@ -110,14 +166,45 @@ describe('AssistedService.iniciar', () => {
         },
       },
     });
-    await expect(svc.iniciar(ORG, 'U', DTO)).rejects.toThrow();
+    await expect(svc.iniciar(ORG, 'U', DTO)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(svc.iniciar(ORG, 'U', DTO)).rejects.toThrow(ERROS_CONEXAO.numero_indisponivel);
     expect(meta.adicionarNumero).not.toHaveBeenCalled();
   });
 
-  it('mapeia colisão de índice único (P2002) para a mensagem genérica, sem chamar a Meta', async () => {
+  it('o veto de número de outra organização CONSOME o orçamento de 24h', async () => {
+    // Sem gravar nada, sondar a plataforma sai de graça: número livre gasta
+    // orçamento e duas idas à Graph API, número de outro cliente não gastava
+    // nada — e a diferença entrega justamente o que o catálogo esconde. A
+    // linha nasce em 'falhou' para NÃO cair nos índices parciais de
+    // solicitação viva (que travariam a própria org).
+    const { svc, prisma } = montar({
+      prisma: {
+        channelConnectionRequest: {
+          findFirst: jest.fn(async ({ where }: any) =>
+            where?.status === 'concluida' ? { id: 'C', organizationId: 'OUTRA' } : null,
+          ),
+          create: jest.fn(async ({ data }: any) => ({ id: 'REQ', ...data })),
+          update: jest.fn(),
+          count: jest.fn().mockResolvedValue(0),
+        },
+      },
+    });
+    await expect(svc.iniciar(ORG, 'U', DTO)).rejects.toBeInstanceOf(BadRequestException);
+    const criada = (prisma.channelConnectionRequest.create as jest.Mock).mock.calls[0][0].data;
+    expect(criada.organizationId).toBe(ORG);
+    expect(criada.status).toBe('falhou');
+    expect(criada.errorCode).toBe('numero_de_outra_org');
+    // a linha entra no MESMO balde que a trava de 24h conta (createdAt + org)
+    expect(criada.phoneHash).toBe(HASH_DTO);
+    // e nunca em texto puro
+    expect(JSON.stringify(criada)).not.toContain('85999999999');
+  });
+
+  it('mapeia colisão de índice único (P2002) para 400 com a mensagem genérica, sem chamar a Meta', async () => {
     // Corrida entre a leitura das travas e a escrita: quem segura de verdade
     // são os índices únicos parciais do banco. O P2002 cru não pode subir
-    // como 500 nem vazar detalhe — vira a mesma mensagem genérica de sempre.
+    // como 500 nem vazar detalhe — vira a mesma mensagem genérica de sempre,
+    // com o mesmo status do veto de "número de outra organização".
     const colisao = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
       code: 'P2002',
       clientVersion: '5.20.0',
@@ -132,7 +219,8 @@ describe('AssistedService.iniciar', () => {
         },
       },
     });
-    await expect(svc.iniciar(ORG, 'U', DTO)).rejects.toBeInstanceOf(ConflictException);
+    await expect(svc.iniciar(ORG, 'U', DTO)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(svc.iniciar(ORG, 'U', DTO)).rejects.toThrow(ERROS_CONEXAO.numero_indisponivel);
     expect(meta.adicionarNumero).not.toHaveBeenCalled();
   });
 
@@ -150,6 +238,27 @@ describe('AssistedService.iniciar', () => {
     const dados = (prisma.channelConnectionRequest.create as jest.Mock).mock.calls[0][0].data;
     expect(JSON.stringify(dados)).not.toContain('85999999999');
     expect(dados.phoneHash).toBeTruthy();
+  });
+
+  it('não grava nem loga o número que a Meta ecoa no texto do erro', async () => {
+    // error_detail é coluna SEM cifra e o único insumo deste fluxo é um
+    // telefone — a Meta às vezes devolve o número dentro da mensagem.
+    const avisoLog = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined as any);
+    const { svc, prisma } = montar({
+      meta: {
+        adicionarNumero: jest.fn().mockResolvedValue({
+          ok: false, codigo: 133005, detalhe: 'Phone number +5585999999999 is already registered',
+        }),
+      },
+    });
+    await expect(svc.iniciar(ORG, 'U', DTO)).rejects.toBeInstanceOf(BadRequestException);
+    const gravado = (prisma.channelConnectionRequest.update as jest.Mock).mock.calls[0][0].data;
+    expect(gravado.errorDetail).not.toContain('5585999999999');
+    expect(gravado.errorDetail).toContain('[…]');
+    // o código numérico, que é o que o suporte usa, continua inteiro
+    expect(gravado.errorCode).toBe('133005');
+    expect(avisoLog).toHaveBeenCalledWith(expect.not.stringContaining('5585999999999'));
+    avisoLog.mockRestore();
   });
 
   it('loga quando inscreverWebhook falha, mas não interrompe o fluxo', async () => {
@@ -187,6 +296,25 @@ describe('AssistedService.verificar', () => {
     phoneE164Enc: 'x', phoneHash: 'HASH_FIXO_REQ', displayName: 'Loja', wabaId: 'WABA', phoneLast4: '9999',
   };
 
+  /** prisma padrão dos testes de verificar(): a solicitação existe e o canal
+   *  nasce sem colisão. `over` sobrescreve o que cada teste precisa. */
+  const comReq = (over: any = {}, dadosReq: any = req) =>
+    montar({
+      prisma: {
+        channelConnectionRequest: {
+          findFirst: jest.fn().mockResolvedValue(dadosReq),
+          create: jest.fn(),
+          update: jest.fn(async ({ data }: any) => data),
+        },
+        whatsappChannel: {
+          count: jest.fn(), findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue({ id: 'CANAL1' }),
+        },
+        ...over.prisma,
+      },
+      meta: over.meta,
+    });
+
   it('nunca persiste o código de 6 dígitos', async () => {
     const { svc, prisma } = montar({
       prisma: { channelConnectionRequest: {
@@ -208,40 +336,188 @@ describe('AssistedService.verificar', () => {
     for (const c of chamadas) {
       expect(JSON.stringify(c[0])).not.toContain('894701');
     }
+    for (const c of (prisma.$executeRaw as jest.Mock).mock.calls) {
+      expect(JSON.stringify(c)).not.toContain('894701');
+    }
   });
 
-  it('queima a solicitação após 5 tentativas erradas', async () => {
-    const { svc } = montar({
-      prisma: { channelConnectionRequest: {
-        findFirst: jest.fn().mockResolvedValue({ ...req, codeAttempts: 4 }),
-        create: jest.fn(), update: jest.fn(async ({ data }: any) => data),
-      } },
-      meta: { verificarCodigo: jest.fn().mockResolvedValue({ ok: false, codigo: 136008, detalhe: 'x' }) },
+  it('queima a solicitação após 5 tentativas erradas — com a mensagem de esgotamento e a transição para falhou', async () => {
+    const { svc, prisma } = comReq(
+      { meta: { verificarCodigo: jest.fn().mockResolvedValue({ ok: false, codigo: 136008, detalhe: 'x' }) } },
+      { ...req, codeAttempts: 4 },
+    );
+    // sem o matcher, o teste passaria com a lógica invertida: os DOIS ramos
+    // (código errado e tentativas esgotadas) lançam.
+    await expect(svc.verificar(ORG, 'REQ', '000000')).rejects.toThrow(/Tentativas esgotadas/i);
+    const gravado = (prisma.channelConnectionRequest.update as jest.Mock).mock.calls[0][0].data;
+    expect(gravado).toMatchObject({ codeAttempts: 5, status: 'falhou', errorCode: 'codigo_esgotado' });
+  });
+
+  it('conta a tentativa sem queimar a solicitação quando ainda restam tentativas', async () => {
+    const { svc, prisma } = comReq(
+      { meta: { verificarCodigo: jest.fn().mockResolvedValue({ ok: false, codigo: 136008, detalhe: 'x' }) } },
+      { ...req, codeAttempts: 1 },
+    );
+    await expect(svc.verificar(ORG, 'REQ', '000000')).rejects.toThrow(/3 tentativa/i);
+    const gravado = (prisma.channelConnectionRequest.update as jest.Mock).mock.calls[0][0].data;
+    expect(gravado.codeAttempts).toBe(2);
+    expect(gravado.status).toBeUndefined();
+  });
+
+  it('grava o sucesso da verificação e o PIN cifrado ANTES de chamar registrar', async () => {
+    const { svc, prisma, meta } = comReq();
+    await svc.verificar(ORG, 'REQ', '123456');
+    const { idx, ordem, args } = chamadaVerificado(prisma);
+    expect(idx).toBeGreaterThanOrEqual(0);
+    const ordemRegistrar = (meta.registrar as jest.Mock).mock.invocationCallOrder[0];
+    expect(ordem).toBeLessThan(ordemRegistrar);
+    // o PIN vai cifrado (formato iv:tag:dados), nunca os 6 dígitos crus
+    expect(String(args[1])).toMatch(/^[^:]+:[^:]+:[^:]+$/);
+    const pinUsado = (meta.registrar as jest.Mock).mock.calls[0][1];
+    expect(String(args[1])).not.toContain(pinUsado);
+  });
+
+  it('quando o registrar falha, a solicitação continua VIVA e já marcada como verificada', async () => {
+    // é o que torna a segunda tentativa possível: sem o sucesso da verificação
+    // persistido, o cliente só pode reenviar o mesmo código, a Meta recusa
+    // ("número já verificado"), isso conta como código errado e as 5
+    // tentativas terminam a solicitação em 'falhou' — com a vaga consumida.
+    const avisoLog = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined as any);
+    const { svc, prisma } = comReq({
+      meta: { registrar: jest.fn().mockResolvedValue({ ok: false, codigo: 133005, detalhe: 'PIN mismatch' }) },
     });
-    await expect(svc.verificar(ORG, 'REQ', '000000')).rejects.toThrow();
+    await expect(svc.verificar(ORG, 'REQ', '123456')).rejects.toBeInstanceOf(BadRequestException);
+    expect(chamadaVerificado(prisma).idx).toBeGreaterThanOrEqual(0);
+    for (const c of (prisma.channelConnectionRequest.update as jest.Mock).mock.calls) {
+      expect(c[0].data.status).toBeUndefined();
+    }
+    const auditoria = (prisma.$executeRaw as jest.Mock).mock.calls
+      .find((args: any[]) => args[3] === 'channel.connect.register_failed');
+    expect(auditoria).toBeDefined();
+    expect(auditoria![4]).toBe('HASH_FIXO_REQ');
+    avisoLog.mockRestore();
   });
 
-  it('grava o PIN cifrado ANTES de chamar registrar', async () => {
-    const { svc, prisma, meta } = montar({
+  it('na segunda tentativa pula a verificação e vai direto para o registro, reusando o PIN guardado', async () => {
+    // A Meta recusa verify_code de número já verificado. Reenviar o código
+    // seria contado como tentativa errada e queimaria a solicitação — e a vaga.
+    const { svc, prisma, meta } = comReq(
+      { prisma: { $queryRaw: jest.fn().mockResolvedValue([{ verificado: true }]) } },
+      { ...req, registerPinEnc: encrypt('424242'), codeAttempts: 2 },
+    );
+    const r = await svc.verificar(ORG, 'REQ', '000000');
+    expect(meta.verificarCodigo).not.toHaveBeenCalled();
+    // reusa o MESMO PIN: registrar de novo com outro trocaria o PIN de duas
+    // etapas do número, se o register anterior tiver acontecido de fato.
+    expect(meta.registrar).toHaveBeenCalledWith('PNID', '424242');
+    expect(r).toEqual({ canalId: 'CANAL1' });
+    // nenhuma tentativa de código consumida
+    for (const c of (prisma.channelConnectionRequest.update as jest.Mock).mock.calls) {
+      expect(c[0].data.codeAttempts).toBeUndefined();
+    }
+  });
+
+  it('gera um PIN novo se o guardado não puder ser decifrado, em vez de travar a solicitação', async () => {
+    const erroLog = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined as any);
+    const { svc, meta } = comReq(
+      { prisma: { $queryRaw: jest.fn().mockResolvedValue([{ verificado: true }]) } },
+      { ...req, registerPinEnc: 'lixo:corrompido:aqui' },
+    );
+    await expect(svc.verificar(ORG, 'REQ', '000000')).resolves.toEqual({ canalId: 'CANAL1' });
+    expect(String((meta.registrar as jest.Mock).mock.calls[0][1])).toMatch(/^\d{6}$/);
+    erroLog.mockRestore();
+  });
+
+  it('canal já existente para a MESMA org fecha a solicitação em vez de virar 500 — a vaga não se perde', async () => {
+    // P2002 aqui significa que a tentativa anterior foi até o fim e só a
+    // resposta (ou a nossa escrita) se perdeu. O número JÁ está registrado na
+    // Meta: 500 aqui é uma vaga irrecuperável por um erro que é nosso.
+    const colisao = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002', clientVersion: '5.20.0',
+    });
+    const { svc, prisma } = comReq({
       prisma: {
-        channelConnectionRequest: {
-          findFirst: jest.fn().mockResolvedValue(req),
-          create: jest.fn(),
-          update: jest.fn(async ({ data }: any) => data),
-        },
         whatsappChannel: {
-          count: jest.fn(), findFirst: jest.fn(),
-          create: jest.fn().mockResolvedValue({ id: 'CANAL1' }),
+          count: jest.fn(),
+          findFirst: jest.fn().mockResolvedValue({ id: 'CANAL_JA_EXISTE', organizationId: ORG }),
+          create: jest.fn().mockRejectedValue(colisao),
         },
       },
     });
-    await svc.verificar(ORG, 'REQ', '123456');
-    const updateMock = (prisma.channelConnectionRequest.update as jest.Mock).mock;
-    const idxPin = updateMock.calls.findIndex((c: any) => 'registerPinEnc' in c[0].data);
-    expect(idxPin).toBeGreaterThanOrEqual(0);
-    const ordemPin = updateMock.invocationCallOrder[idxPin];
-    const ordemRegistrar = (meta.registrar as jest.Mock).mock.invocationCallOrder[0];
-    expect(ordemPin).toBeLessThan(ordemRegistrar);
+    await expect(svc.verificar(ORG, 'REQ', '123456')).resolves.toEqual({ canalId: 'CANAL_JA_EXISTE' });
+    const fechou = (prisma.channelConnectionRequest.update as jest.Mock).mock.calls
+      .find((c: any[]) => c[0].data.status === 'concluida');
+    expect(fechou![0].data.channelId).toBe('CANAL_JA_EXISTE');
+    const auditoria = (prisma.$executeRaw as jest.Mock).mock.calls
+      .find((args: any[]) => args[3] === 'channel.connect.registered');
+    expect(JSON.parse(auditoria![5])).toEqual({ canalId: 'CANAL_JA_EXISTE', reaproveitado: true });
+  });
+
+  it('número já em OUTRA organização vira 400 do catálogo, com error_code e log — nunca 500', async () => {
+    // colisão no índice global idx_channels_pnid_global: o canal não pode
+    // nascer, mas a vaga já foi consumida — o operador precisa do rastro para
+    // a baixa manual no WhatsApp Manager.
+    const colisao = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002', clientVersion: '5.20.0',
+    });
+    const erroLog = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined as any);
+    const { svc, prisma } = comReq({
+      prisma: {
+        whatsappChannel: {
+          count: jest.fn(),
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockRejectedValue(colisao),
+        },
+      },
+    });
+    await expect(svc.verificar(ORG, 'REQ', '123456')).rejects.toThrow(ERROS_CONEXAO.numero_indisponivel);
+    await expect(svc.verificar(ORG, 'REQ', '123456')).rejects.toBeInstanceOf(BadRequestException);
+    const morreu = (prisma.channelConnectionRequest.update as jest.Mock).mock.calls
+      .find((c: any[]) => c[0].data.errorCode === 'pnid_de_outra_org');
+    expect(morreu![0].data.status).toBe('falhou');
+    expect(erroLog).toHaveBeenCalledWith(expect.stringContaining('PNID'));
+    const auditoria = (prisma.$executeRaw as jest.Mock).mock.calls
+      .find((args: any[]) => args[3] === 'channel.connect.channel_failed');
+    expect(auditoria).toBeDefined();
+    erroLog.mockRestore();
+  });
+
+  it('falha do banco ao criar o canal vira mensagem do catálogo e deixa a solicitação retomável', async () => {
+    const erroLog = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined as any);
+    const { svc, prisma } = comReq({
+      prisma: {
+        whatsappChannel: {
+          count: jest.fn(),
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockRejectedValue(new Error('conexão com o banco caiu')),
+        },
+      },
+    });
+    await expect(svc.verificar(ORG, 'REQ', '123456')).rejects.toThrow(ERROS_CONEXAO.generico);
+    const erro = (prisma.channelConnectionRequest.update as jest.Mock).mock.calls
+      .find((c: any[]) => c[0].data.errorCode === 'canal_nao_criado');
+    expect(erro).toBeDefined();
+    // solicitação continua VIVA: nenhum update muda o status
+    for (const c of (prisma.channelConnectionRequest.update as jest.Mock).mock.calls) {
+      expect(c[0].data.status).toBeUndefined();
+    }
+    erroLog.mockRestore();
+  });
+
+  it('não registra na Meta se não conseguiu persistir o sucesso da verificação', async () => {
+    // Falhar aqui é a direção segura: registrar sem ter gravado a verificação
+    // recriaria exatamente a armadilha — número registrado, nenhuma marca no
+    // banco, e a segunda tentativa só podendo reenviar um código que a Meta
+    // já não aceita.
+    const { svc, meta } = comReq({
+      prisma: {
+        $executeRaw: jest.fn(async (trechos: any) => {
+          if (trechos.join('').includes('code_verified_at')) throw new Error('banco fora');
+        }),
+      },
+    });
+    await expect(svc.verificar(ORG, 'REQ', '123456')).rejects.toThrow();
+    expect(meta.registrar).not.toHaveBeenCalled();
   });
 
   it('rejeita quando a solicitação ainda não tem phoneNumberId, sem consumir tentativa', async () => {
@@ -266,15 +542,10 @@ describe('AssistedService.verificar', () => {
   // as asserções abaixo indexam os argumentos da chamada, e não tentam casar
   // por substring de SQL.
   it('grava channel.connect.registered com o hash do telefone (nao com dado sensivel) e o canalId em metadata', async () => {
-    const { svc, prisma } = montar({
+    const { svc, prisma } = comReq({
       prisma: {
-        channelConnectionRequest: {
-          findFirst: jest.fn().mockResolvedValue(req),
-          create: jest.fn(),
-          update: jest.fn(async ({ data }: any) => data),
-        },
         whatsappChannel: {
-          count: jest.fn(), findFirst: jest.fn(),
+          count: jest.fn(), findFirst: jest.fn().mockResolvedValue(null),
           create: jest.fn().mockResolvedValue({ id: 'CANAL_XYZ' }),
         },
       },
@@ -314,18 +585,17 @@ describe('AssistedService.verificar', () => {
     // operação que na verdade deu certo, tentaria de novo, e queimaria outra
     // vaga — que não volta por API. auditar() precisa engolir isso.
     const erroLog = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined as any);
-    const { svc, prisma } = montar({
+    const { svc, prisma } = comReq({
       prisma: {
-        channelConnectionRequest: {
-          findFirst: jest.fn().mockResolvedValue(req),
-          create: jest.fn(),
-          update: jest.fn(async ({ data }: any) => data),
-        },
         whatsappChannel: {
-          count: jest.fn(), findFirst: jest.fn(),
+          count: jest.fn(), findFirst: jest.fn().mockResolvedValue(null),
           create: jest.fn().mockResolvedValue({ id: 'CANAL_OK' }),
         },
-        $executeRaw: jest.fn().mockRejectedValue(new Error('conexão com o banco caiu')),
+        // só a gravação da AUDITORIA falha: a escrita de code_verified_at é
+        // pré-requisito do registro e, essa sim, tem que abortar (teste abaixo).
+        $executeRaw: jest.fn(async (trechos: any) => {
+          if (trechos.join('').includes('audit_logs')) throw new Error('conexão com o banco caiu');
+        }),
       },
     });
     const resultado = await svc.verificar(ORG, 'REQ', '123456');
@@ -341,8 +611,8 @@ describe('AssistedService.verificar', () => {
 describe('AssistedService.reenviar', () => {
   const req = {
     id: 'REQ', organizationId: ORG, status: 'aguardando_codigo',
-    phoneNumberId: 'PNID', codeRequests: 0, lastCodeSentAt: null,
-    phoneE164Enc: 'x', displayName: 'Loja', wabaId: 'WABA', phoneLast4: '9999',
+    phoneNumberId: 'PNID', codeRequests: 0, lastCodeSentAt: null, createdBy: 'U',
+    phoneE164Enc: 'x', phoneHash: 'HASH_REENVIO', displayName: 'Loja', wabaId: 'WABA', phoneLast4: '9999',
   };
 
   it('rejeita quando a solicitação ainda não tem phoneNumberId', async () => {
@@ -354,6 +624,31 @@ describe('AssistedService.reenviar', () => {
     });
     await expect(svc.reenviar(ORG, 'REQ', 'SMS')).rejects.toBeInstanceOf(BadRequestException);
     expect(meta.pedirCodigo).not.toHaveBeenCalled();
+  });
+
+  it('falha da Meta no reenvio deixa rastro: log, error_code e auditoria', async () => {
+    // era o único erro da Meta no fluxo inteiro sem rastro nenhum — o cliente
+    // liga para o suporte dizendo "não chega SMS" e não havia o que olhar.
+    const avisoLog = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined as any);
+    const { svc, prisma } = montar({
+      prisma: { channelConnectionRequest: {
+        findFirst: jest.fn().mockResolvedValue(req),
+        create: jest.fn(), update: jest.fn(async ({ data }: any) => data),
+      } },
+      meta: { pedirCodigo: jest.fn().mockResolvedValue({ ok: false, codigo: 131048, detalhe: 'rate limit' }) },
+    });
+    await expect(svc.reenviar(ORG, 'REQ', 'VOICE')).rejects.toBeInstanceOf(BadRequestException);
+    expect(avisoLog).toHaveBeenCalledWith(expect.stringContaining('131048'));
+    const gravado = (prisma.channelConnectionRequest.update as jest.Mock).mock.calls[0][0].data;
+    expect(gravado.errorCode).toBe('131048');
+    // a solicitação continua VIVA: reenviar é retentável
+    expect(gravado.status).toBeUndefined();
+    const auditoria = (prisma.$executeRaw as jest.Mock).mock.calls
+      .find((args: any[]) => args[3] === 'channel.connect.resend_failed');
+    expect(auditoria).toBeDefined();
+    expect(auditoria![4]).toBe('HASH_REENVIO');
+    expect(JSON.parse(auditoria![5])).toEqual({ metodo: 'VOICE', codigoMeta: 131048 });
+    avisoLog.mockRestore();
   });
 });
 
