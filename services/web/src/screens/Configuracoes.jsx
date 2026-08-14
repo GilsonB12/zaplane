@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import {
-  Plus, MoreVertical, Trash2,
+  MoreVertical, Trash2,
   Phone, CreditCard, UserCog,
   Info, AlertTriangle, Wallet, Receipt,
 } from "lucide-react";
@@ -11,8 +11,8 @@ import {
   activateSubscription, ackChannelPayment,
 } from "../api/endpoints.js";
 import { formatBRL } from "../utils/money.js";
-import ConectarWhatsAppButton from "../components/ConectarWhatsAppButton.jsx";
-import ConectarManualModal from "../components/ConectarManualModal.jsx";
+import { useAuth } from "../auth/AuthContext.jsx";
+import ConectarNumeroWizard from "./conexao/ConectarNumeroWizard.jsx";
 import GuiaPagamentoMeta from "../components/GuiaPagamentoMeta.jsx";
 
 /* ----------------------------- Metadados da aba Conexão ----------------------------- */
@@ -20,6 +20,7 @@ const VIA_META = {
   manual:           { label: "Manual",           cls: "bg-sky-50 text-sky-700 ring-sky-600/20 dark:bg-sky-500/10 dark:text-sky-300" },
   embedded_signup:  { label: "Embedded Signup",   cls: "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300" },
   bootstrap:        { label: "Inicial (seed)",    cls: "bg-zinc-100 text-zinc-600 ring-zinc-500/20 dark:bg-zinc-700/40 dark:text-zinc-300" },
+  assisted:         { label: "Conectado pela Zaplane", cls: "text-emerald-700 ring-emerald-200 dark:text-emerald-300 dark:ring-emerald-500/30" },
 };
 const STATUS_CANAL = {
   active:   { label: "Ativo",         cls: "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300" },
@@ -541,8 +542,8 @@ function AbaEquipe() {
 
 /* ----------------------------- Configurações ----------------------------- */
 export default function Configuracoes() {
+  const { user } = useAuth();
   const [tab, setTab] = useState("meta");
-  const [modalManualAberto, setModalManualAberto] = useState(false);
   const [erroDesconectar, setErroDesconectar] = useState(null);
   // canal cujo guia de forma de pagamento está aberto (null = fechado)
   const [guiaPagamento, setGuiaPagamento] = useState(null);
@@ -583,22 +584,22 @@ export default function Configuracoes() {
     }
   }
 
-  const botoesConectar = (
-    <div className="flex flex-wrap items-start gap-3">
-      <ConectarWhatsAppButton onConnected={canaisRes.reload} primary />
-      <button
-        onClick={() => setModalManualAberto(true)}
-        className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-3.5 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:py-2"
-      >
-        <Plus className="h-4 w-4" /> Conectar manualmente
-      </button>
-    </div>
+  const wizardConectar = (
+    <ConectarNumeroWizard
+      nomeOrganizacao={user?.organizationName}
+      onConectado={canaisRes.reload}
+    />
   );
 
   // Canais ativos que ainda não tiveram a forma de pagamento confirmada.
   // Não dá para verificar isso na Meta (é restrito a Solution Provider), então
-  // o painel lembra do passo até o cliente dizer que resolveu.
-  const semPagamento = canais.filter((c) => c.status === "active" && !c.paymentAckAt);
+  // o painel lembra do passo até o cliente dizer que resolveu. Canais assistidos
+  // vivem na WABA da Zaplane — quem paga a Meta é a Zaplane, então o aviso não
+  // se aplica. Os legados (manual/embedded_signup) continuam precisando dele,
+  // por isso o bloco não é removido.
+  const semPagamento = canais.filter(
+    (c) => c.status === "active" && !c.paymentAckAt && c.connectedVia !== "assisted",
+  );
 
   return (
     <div className="space-y-4 p-4 sm:space-y-5 sm:p-6 lg:p-7">
@@ -632,7 +633,7 @@ export default function Configuracoes() {
                 Conecte pelo menos um número do WhatsApp Business para disparar campanhas.
               </p>
             </div>
-            {canais.length > 0 && botoesConectar}
+            {canais.length > 0 && wizardConectar}
           </div>
 
           {erroDesconectar && (
@@ -709,10 +710,10 @@ export default function Configuracoes() {
             canais.length === 0 ? (
               <Card className="flex flex-col items-center gap-4 p-6 text-center sm:p-10">
                 <p className="text-[13px] text-zinc-500 dark:text-zinc-400">
-                  Nenhum número conectado ainda. Conecte pelo popup oficial da Meta ou cole as
-                  credenciais manualmente.
+                  Nenhum número conectado ainda. Conecte um número do WhatsApp Business para
+                  disparar campanhas.
                 </p>
-                {botoesConectar}
+                {wizardConectar}
               </Card>
             ) : (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -786,13 +787,6 @@ export default function Configuracoes() {
                 })}
               </div>
             )
-          )}
-
-          {modalManualAberto && (
-            <ConectarManualModal
-              onClose={() => setModalManualAberto(false)}
-              onConnected={canaisRes.reload}
-            />
           )}
 
           {guiaPagamento && (

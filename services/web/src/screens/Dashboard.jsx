@@ -210,7 +210,11 @@ export default function Dashboard({ setScreen, openCampaign }) {
             <div>
               <div className="text-[11px] text-zinc-400">Conectado via</div>
               <div className="mt-0.5 text-sm font-medium text-zinc-800 dark:text-zinc-100">
-                {canal.connectedVia === "embedded_signup" ? "WhatsApp" : "Manual"}
+                {canal.connectedVia === "assisted"
+                  ? "Conectado pela Zaplane"
+                  : canal.connectedVia === "embedded_signup"
+                  ? "WhatsApp"
+                  : "Manual"}
               </div>
             </div>
           </div>
