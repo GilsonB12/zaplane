@@ -35,8 +35,13 @@ describe('MetaNumerosClient', () => {
     ]);
     const r = await cli().adicionarNumero('WABA', { cc: '55', nacional: '85999999999', semNono: '8599999999', e164: '+5585999999999', ultimos4: '9999' }, 'Loja');
     expect(r).toEqual({ ok: true, phoneNumberId: '999' });
-    expect(chamadas[0].init.body).toContain('85999999999');
-    expect(chamadas[1].init.body).toContain('8599999999');
+    // comparação por igualdade do parâmetro (não por substring): semNono é
+    // prefixo de nacional nesse fixture, então toContain não pegaria uma
+    // regressão que reenviasse o mesmo numero nas duas tentativas
+    const numero0 = new URLSearchParams(chamadas[0].init.body).get('phone_number');
+    const numero1 = new URLSearchParams(chamadas[1].init.body).get('phone_number');
+    expect(numero0).toBe('85999999999');
+    expect(numero1).toBe('8599999999');
   });
 
   it('expoe o codigo da Meta para o log, sem repassar texto', async () => {
