@@ -30,6 +30,17 @@ export interface ScopedChannel {
   organizationId: string;
 }
 
+/** Numa WABA compartilhada entre clientes, um alerta sem número identificado
+ *  não pode ser espalhado: marcaria CRITICAL no painel de todos sobre algo que
+ *  nenhum deles resolve. Sem identificação, o alerta é da PLATAFORMA. */
+export function escolherCanaisDoAlerta<T extends { phoneNumberId: string }>(
+  canais: T[],
+  scopedPhoneNumberId: string | null,
+): T[] {
+  if (!scopedPhoneNumberId) return [];
+  return canais.filter((c) => c.phoneNumberId === scopedPhoneNumberId);
+}
+
 @Injectable()
 export class WebhooksService {
   private readonly logger = new Logger('Webhooks');
@@ -214,10 +225,13 @@ export class WebhooksService {
 
     // se o payload veio autenticado pelo secret de um canal específico, o
     // alerta só pode afetar aquele canal (mesma defesa do fluxo de status)
-    const alvos = scopedPhoneNumberId
-      ? canais.filter((c) => c.phoneNumberId === scopedPhoneNumberId)
-      : canais;
-    if (alvos.length === 0) return;
+    const alvos = escolherCanaisDoAlerta(canais, scopedPhoneNumberId);
+    if (alvos.length === 0) {
+      this.logger.error(
+        `ALERTA DE PLATAFORMA na WABA ${wabaId}: ${value?.alert_severity} ${value?.alert_type} — ${value?.alert_description ?? ''}`,
+      );
+      return;
+    }
 
     const resolvido = String(value?.alert_status ?? '').toUpperCase() === 'RESOLVED';
     const data = resolvido
