@@ -53,9 +53,12 @@ describe('ChannelsModule — configuração da conexão assistida no boot', () =
 
 describe('ChannelsModule — timeout do client da Meta', () => {
   const original = process.env.META_HTTP_TIMEOUT_MS;
-  // O default do client lê process.env; limpar aqui garante que o valor
-  // observado veio mesmo do ConfigService, e não do ambiente da máquina.
-  beforeEach(() => delete process.env.META_HTTP_TIMEOUT_MS);
+  // Em produção, o ConfigService e o process.env são a MESMA fonte. Este bloco
+  // sujava o ambiente antes de cada teste, o que escondia o defeito: enquanto o
+  // default do client relia a env var, "abc" chegava como NaN só quando a
+  // variável existia de verdade — exatamente o caso de produção. Agora o valor
+  // inválido é plantado no ambiente, para o teste correr na condição real.
+  beforeEach(() => { process.env.META_HTTP_TIMEOUT_MS = 'abc'; });
   afterAll(() => {
     if (original === undefined) delete process.env.META_HTTP_TIMEOUT_MS;
     else process.env.META_HTTP_TIMEOUT_MS = original;

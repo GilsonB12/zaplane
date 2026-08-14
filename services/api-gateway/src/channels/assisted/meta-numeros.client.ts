@@ -24,6 +24,14 @@ const falhaDeTransporte = (motivo: string) => ({
  *  estouro falha FECHADO (vira Falha) em vez de devolver um total menor. */
 const MAX_PAGINAS = 50;
 
+/** Timeout padrão de cada chamada à Graph API. É uma CONSTANTE de propósito: se
+ *  fosse lido de `process.env` aqui, a validação do provider (timeoutDaMeta)
+ *  viraria enfeite — ela devolve `undefined` para valor inválido justamente para
+ *  cair neste default, e cair de volta na mesma env var traria o valor inválido
+ *  de volta. `META_HTTP_TIMEOUT_MS=abc` daria `NaN`, e `setTimeout(NaN)` aborta
+ *  em 1 ms: toda chamada à Meta morreria e o cliente leria "capacidade cheia". */
+const TIMEOUT_PADRAO_MS = 15_000;
+
 /** Chamadas da Meta para adicionar, verificar e registrar um número.
  *  Contrato verificado em produção — ver spec §4. O token vai SEMPRE por
  *  header: em query string ele vazaria para log de proxy e histórico. */
@@ -32,9 +40,10 @@ export class MetaNumerosClient {
   constructor(
     private readonly versao: string,
     private readonly token: string,
-    /** Timeout de cada chamada à Graph API. Configurável (META_HTTP_TIMEOUT_MS)
-     *  e injetável pelo provider — nunca fixo no código. */
-    private readonly timeoutMs = parseInt(process.env.META_HTTP_TIMEOUT_MS || '15000', 10),
+    /** Timeout de cada chamada à Graph API. Configurável por
+     *  META_HTTP_TIMEOUT_MS, mas quem lê e valida a variável é o provider
+     *  (channels.module.ts); aqui só entra o valor já aprovado ou o default. */
+    private readonly timeoutMs = TIMEOUT_PADRAO_MS,
   ) {}
 
   private chamar(caminho: string, metodo: 'GET' | 'POST', corpo?: URLSearchParams) {

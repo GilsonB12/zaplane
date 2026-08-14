@@ -11,9 +11,11 @@ import { ReconciliacaoService } from './assisted/reconciliacao.service';
 const logger = new Logger('ChannelsModule');
 
 /** Timeout de cada chamada à Graph API, pelo ConfigService (nunca
- *  `process.env` direto no meio do código). Valor ausente OU inválido cai no
- *  default do próprio client: `parseInt('abc')` é NaN, e `setTimeout(NaN)`
- *  dispara na hora — toda chamada à Meta morreria como "tempo esgotado". */
+ *  `process.env` direto no meio do código). Valor ausente OU inválido devolve
+ *  `undefined` para cair no default do client — que é uma CONSTANTE, não outra
+ *  leitura da mesma variável. Se o client relesse a env var, `abc` voltaria como
+ *  `NaN`, `setTimeout(NaN)` abortaria em 1 ms e toda chamada à Meta morreria
+ *  como "tempo esgotado", com o cliente lendo "capacidade cheia". */
 export function timeoutDaMeta(config: ConfigService): number | undefined {
   const ms = parseInt(String(config.get<string>('META_HTTP_TIMEOUT_MS') ?? ''), 10);
   return Number.isFinite(ms) && ms > 0 ? ms : undefined;
