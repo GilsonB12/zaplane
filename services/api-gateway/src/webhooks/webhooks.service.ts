@@ -30,6 +30,31 @@ export interface ScopedChannel {
   organizationId: string;
 }
 
+/** Decide quais canais um alerta de conta da Meta deve afetar.
+ *
+ *  A Zaplane autentica todo webhook assinado com o secret global do seu app —
+ *  tanto o da WABA COMPARTILHADA (conexão assistida) quanto o de uma WABA
+ *  DEDICADA de cliente legado (embedded_signup próprio, com o app Zaplane só
+ *  inscrito nela). Nos dois casos `scopedPhoneNumberId` volta nulo, mas o
+ *  significado é oposto:
+ *   - WABA compartilhada: sem número identificado, o alerta é da PLATAFORMA
+ *     (ex.: cobrança do cartão da Zaplane) — espalhar marcaria CRITICAL no
+ *     painel de todo cliente que compartilha a WABA sobre algo que nenhum
+ *     deles resolve.
+ *   - WABA dedicada: mesmo sem número identificado, o alerta é sobre a conta
+ *     DAQUELE cliente — é o único aviso que a Zaplane recebe sobre a saúde
+ *     dela (os campos de billing da WABA são exclusivos de Business Solution
+ *     Provider). Não propagar deixaria o cliente cego até a Meta bloquear o
+ *     número — e um RESOLVED nunca limparia o alerta preso no painel dele. */
+export function escolherCanaisDoAlerta<T extends { phoneNumberId: string }>(
+  canais: T[],
+  scopedPhoneNumberId: string | null,
+  compartilhada: boolean,
+): T[] {
+  if (scopedPhoneNumberId) return canais.filter((c) => c.phoneNumberId === scopedPhoneNumberId);
+  return compartilhada ? [] : canais;
+}
+
 @Injectable()
 export class WebhooksService {
   private readonly logger = new Logger('Webhooks');
@@ -213,11 +238,19 @@ export class WebhooksService {
     if (canais.length === 0) return;
 
     // se o payload veio autenticado pelo secret de um canal específico, o
-    // alerta só pode afetar aquele canal (mesma defesa do fluxo de status)
-    const alvos = scopedPhoneNumberId
-      ? canais.filter((c) => c.phoneNumberId === scopedPhoneNumberId)
-      : canais;
-    if (alvos.length === 0) return;
+    // alerta só pode afetar aquele canal (mesma defesa do fluxo de status).
+    // Sem número identificado, a distinção que importa é de quem é a WABA:
+    // a compartilhada da Zaplane (conexão assistida) vs uma dedicada de
+    // cliente legado — ver doc de escolherCanaisDoAlerta.
+    const compartilhada = wabaId === this.config.get<string>('assisted.wabaId');
+    const alvos = escolherCanaisDoAlerta(canais, scopedPhoneNumberId, compartilhada);
+    if (alvos.length === 0) {
+      // igual ao warn abaixo, não logamos a descrição (pode conter dado do cliente)
+      this.logger.error(
+        `ALERTA DE PLATAFORMA na WABA ${wabaId} (tipo: ${value?.alert_type ?? 'n/d'}, severidade: ${value?.alert_severity ?? 'n/d'}).`,
+      );
+      return;
+    }
 
     const resolvido = String(value?.alert_status ?? '').toUpperCase() === 'RESOLVED';
     const data = resolvido

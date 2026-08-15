@@ -23,6 +23,7 @@ import { BillingModule } from './billing/billing.module';
 import { MembersModule } from './members/members.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { MailModule } from './common/mail/mail.module';
+import { QuotaModule } from './common/quota.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { MailModule } from './common/mail/mail.module';
     JwtModule.register({}),
     PrismaModule,
     MailModule,
+    QuotaModule,
     AuthModule,
     ContactsModule,
     ListsModule,

@@ -118,8 +118,10 @@ export default function Dashboard({ setScreen, openCampaign }) {
 
       {/* Passo pendente: forma de pagamento na Meta. Não conseguimos verificar
           isso por API (é restrito a Solution Provider), então orientamos assim
-          que o número é conectado — sem esse cartão, a Meta trava os envios. */}
-      {canal && !canal.alerta && (
+          que o número é conectado — sem esse cartão, a Meta trava os envios.
+          Canal assistido vive na WABA da Zaplane — quem paga a Meta é a
+          Zaplane, então este aviso é falso para ele e precisa ficar de fora. */}
+      {canal && !canal.alerta && canal.connectedVia !== "assisted" && (
         <details className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
           <summary className="cursor-pointer list-none text-sm font-medium text-zinc-800 dark:text-zinc-100">
             <span className="inline-flex items-center gap-2">
@@ -210,7 +212,11 @@ export default function Dashboard({ setScreen, openCampaign }) {
             <div>
               <div className="text-[11px] text-zinc-400">Conectado via</div>
               <div className="mt-0.5 text-sm font-medium text-zinc-800 dark:text-zinc-100">
-                {canal.connectedVia === "embedded_signup" ? "WhatsApp" : "Manual"}
+                {canal.connectedVia === "assisted"
+                  ? "Conectado pela Zaplane"
+                  : canal.connectedVia === "embedded_signup"
+                  ? "WhatsApp"
+                  : "Manual"}
               </div>
             </div>
           </div>

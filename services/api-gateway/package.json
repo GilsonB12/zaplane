@@ -11,7 +11,7 @@
     "prisma:generate": "prisma generate",
     "prisma:pull": "prisma db pull",
     "lint": "eslint \"src/**/*.ts\" --fix",
-    "test": "jest"
+    "test": "jest --passWithNoTests"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.4",
@@ -37,10 +37,19 @@
     "@nestjs/schematics": "^10.1.4",
     "@nestjs/testing": "^10.4.4",
     "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.14",
     "@types/multer": "^1.4.12",
     "@types/node": "^22.7.4",
     "@types/passport-jwt": "^4.0.1",
+    "jest": "^29.7.0",
     "prisma": "^5.20.0",
+    "ts-jest": "^29.4.12",
     "typescript": "^5.6.2"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$"
   }
 }

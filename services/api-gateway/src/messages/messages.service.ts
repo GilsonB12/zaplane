@@ -1,12 +1,13 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { BillingService } from '../billing/billing.service';
+import { QuotaService } from '../common/quota.service';
 import { phoneHash } from '../common/crypto.util';
 import { normalizeBrPhone } from '../common/phone.util';
 
 @Injectable()
 export class MessagesService {
-  constructor(private prisma: PrismaService, private billing: BillingService) {}
+  constructor(private prisma: PrismaService, private billing: BillingService, private quota: QuotaService) {}
 
   /** Envio avulso para 1 número: enfileira uma outbound_message (template).
    *  channelId é opcional: sem ele, usa o canal ativo do org (padrão A5). */
@@ -53,6 +54,12 @@ export class MessagesService {
     const fee = await this.billing.estimatePlatformFee(orgId, template.category, 1);
     await this.billing.assertBalanceFor(orgId, fee.totalCents);
 
+    // cota diária de destinatários únicos por organização — o envio avulso é
+    // um caminho de enfileiramento tão real quanto o de campanha (mensagem de
+    // TEMPLATE, business-initiated), então precisa da mesma trava: sem ela,
+    // dava para contornar a cota da campanha chamando este endpoint em loop.
+    await this.quota.garantirCota(orgId, 1);
+
     const msg = await this.prisma.outboundMessage.create({
       data: {
         organizationId: orgId, channelId: channel.id, contactId: contact?.id ?? null,
@@ -97,6 +104,13 @@ export class MessagesService {
     // carteira zerada, cobrando por algo que é gratuito dos dois lados.
     // (Se algum dia a Meta voltar a tarifar, o débito real continua vindo do
     // webhook, que é a fonte de verdade.)
+    //
+    // Sem checagem de QuotaService de propósito: a cota existe para proteger
+    // o limite de mensagens do PORTFÓLIO, que a Meta aplica só a conversas
+    // BUSINESS-INITIATED (mensagens de template fora da janela de 24h). Texto
+    // livre é resposta dentro da janela de serviço — não abre conversa nova
+    // nem consome essa capacidade; a própria Meta rejeita o envio se não
+    // houver janela aberta (contato não escreveu nas últimas 24h).
 
     const msg = await this.prisma.outboundMessage.create({
       data: {

@@ -30,6 +30,11 @@ export default () => ({
     graphVersion: process.env.WHATSAPP_GRAPH_API_VERSION || 'v21.0',
     webhookVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || '',
     appSecret: process.env.WHATSAPP_APP_SECRET || '',
+    // Token de System User da Zaplane (Meta Business) — NÃO é o token por
+    // canal do cliente (esse vem cifrado do banco, ver dispatcher). É o
+    // token usado pela CONEXÃO ASSISTIDA para adicionar, verificar e
+    // registrar o número do cliente na WABA da própria Zaplane.
+    accessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
   },
   encryptionKey: process.env.APP_ENCRYPTION_KEY || '',
   webhookPublicUrl: process.env.WEBHOOK_PUBLIC_URL || '',
@@ -67,5 +72,39 @@ export default () => ({
     appId: process.env.ZAPLANE_FB_APP_ID || '',
     appSecret: process.env.ZAPLANE_FB_APP_SECRET || '',
     esConfigId: process.env.ZAPLANE_ES_CONFIG_ID || '',
+  },
+  assisted: {
+    // WABA da Zaplane que recebe os números dos clientes
+    wabaId: process.env.ZAPLANE_WABA_ID || '',
+    // teto de números por WABA na Meta (2 sobe para 20 com empresa verificada)
+    phoneCap: parseInt(process.env.ZAPLANE_WABA_PHONE_CAP || '20', 10),
+    // canais ativos permitidos por organização
+    orgMaxChannels: parseInt(process.env.ORG_MAX_CHANNELS || '1', 10),
+    // Limite de mensagens é do PORTFÓLIO e compartilhado por todos os números
+    // (Meta, desde 07/10/2025). Sem cota por org, um cliente consome o pote de
+    // todos. Ver spec §2.
+    orgDailyQuota: parseInt(process.env.ORG_DAILY_MESSAGE_QUOTA || '200', 10),
+    // Teto de tentativas de conexão assistida por organização em 24h
+    // (qualquer status). O recurso protegido — vagas de número na WABA da
+    // Zaplane (ZAPLANE_WABA_PHONE_CAP) — é GLOBAL, compartilhado por toda a
+    // plataforma, mas o @Throttle do controller conta por USUÁRIO autenticado
+    // (chave `u:${sub}` no TenantThrottlerGuard) — usuários diferentes da
+    // MESMA organização somam baldes independentes contra o mesmo teto
+    // global. Sem esta trava contada no banco, por organização, uma única
+    // organização insistindo esgota as vagas de todo mundo em minutos — a
+    // vaga não volta por API.
+    maxConnectAttempts24h: parseInt(process.env.ORG_MAX_CONNECT_ATTEMPTS_24H || '5', 10),
+    // Teto de VAGAS QUEIMADAS por organização em 24h — solicitações que já
+    // chegaram a ter phone_number_id (a Meta aceitou o número, a vaga foi
+    // consumida) e não terminaram conectadas. É trava diferente da de cima:
+    // aquela conta TENTATIVAS, e uma tentativa que a Meta recusa não custa
+    // vaga nenhuma, enquanto uma vaga consumida não volta por API.
+    // Default 2 e não 5: a WABA inteira tem ZAPLANE_WABA_PHONE_CAP (~20)
+    // vagas para TODA a plataforma e ORG_MAX_CHANNELS é 1, então uma
+    // organização legítima precisa de exatamente uma. O 2 deixa margem para
+    // um percalço real (número digitado errado que a Meta aceitou, SMS que
+    // nunca chegou) e ainda assim limita o estrago diário de uma única
+    // organização a 10% da capacidade da plataforma, em vez de 25%.
+    maxBurnedSlots24h: parseInt(process.env.ORG_MAX_BURNED_SLOTS_24H || '2', 10),
   },
 });

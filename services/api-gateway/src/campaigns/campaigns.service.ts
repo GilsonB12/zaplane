@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { BillingService } from '../billing/billing.service';
+import { QuotaService } from '../common/quota.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { QueryCampaignsDto } from './dto/query-campaigns.dto';
 
@@ -16,7 +17,7 @@ const RATE_CENTS: Record<string, number> = {
 
 @Injectable()
 export class CampaignsService {
-  constructor(private prisma: PrismaService, private billing: BillingService) {}
+  constructor(private prisma: PrismaService, private billing: BillingService, private quota: QuotaService) {}
 
   async create(orgId: string, userId: string, dto: CreateCampaignDto) {
     // fallback: usa o canal ativo do org quando channelId não é informado
@@ -65,6 +66,19 @@ export class CampaignsService {
     // a Meta confirma billable=true, via webhook).
     await this.billing.assertBalanceFor(orgId, fee.totalCents);
 
+    // 4.1) cota diária de destinatários únicos por organização — checada
+    // ANTES de criar a campanha (mesmo precedente do assertBalanceFor acima),
+    // com o público final (pós-supressão, "eligible") já resolvido. Só se
+    // aplica quando a campanha vai enfileirar agora de fato — campanha
+    // agendada (scheduledAt) ou sem elegíveis não gera INSERT nenhum aqui, e
+    // por isso não tem o que checar. Checar antes evita deixar uma campanha
+    // órfã (status 'queuing', sem nenhuma mensagem) quando a cota estoura —
+    // se checássemos só depois do create, a campanha já teria sido
+    // persistida antes do bloqueio.
+    if (eligible.length > 0 && !dto.scheduledAt) {
+      await this.quota.garantirCota(orgId, eligible.length);
+    }
+
     // 5) cria a campanha
     const campaign = await this.prisma.campaign.create({
       data: {
@@ -79,7 +93,8 @@ export class CampaignsService {
       },
     });
 
-    // 6) enfileira (uma linha por destinatário em outbound_messages)
+    // 6) enfileira (uma linha por destinatário em outbound_messages) — cota
+    // já checada no passo 4.1, antes da campanha existir
     if (eligible.length > 0 && !dto.scheduledAt) {
       const rows = eligible.map((c) => ({
         organizationId: orgId,
