@@ -168,45 +168,77 @@ o serviço reinicia e **não sobe** até o token entrar.
 ### 4.2 Ordem do deploy do isolamento de templates por dono (leia antes de dar `git push`)
 
 **A migração `014` também vai ANTES do código — mesmo motivo da `013` (§4.1),
-mas desta vez quem quebra é o envio, não só a tela de templates.**
+mas desta vez quem quebra é o LOGIN, para todo mundo. Não é "o envio para de
+funcionar por alguns minutos": é o produto inteiro parado, e ninguém consegue
+nem entrar no painel para descobrir o que houve.**
 
 Por quê: a `014` acrescenta `meta_name` e `scope` à tabela `templates` (o
 prefixo por dono que isola quem divide a WABA da Zaplane — ver
-`docs/superpowers/specs/2026-08-17-templates-por-dono-design.md`), e
-`services/api-gateway/prisma/schema.prisma` já declara as duas colunas
+`docs/superpowers/specs/2026-08-17-templates-por-dono-design.md`) **e
+`is_platform_admin` à tabela `users`**, e
+`services/api-gateway/prisma/schema.prisma` já declara as três colunas
 novas. Como o Prisma **nunca faz `SELECT *`** (lista as colunas uma a uma),
-com o código novo no ar e a `014` não aplicada **toda** consulta à tabela
-`templates` morre com *"column templates.meta_name does not exist"* — e essa
-consulta não acontece só na tela de templates:
-`services/api-gateway/src/messages/messages.service.ts` (linha ~38) busca o
-template antes de enfileirar um **envio avulso**, e
-`services/api-gateway/src/campaigns/campaigns.service.ts` faz a mesma busca
-antes de criar uma **campanha**. As duas quebram junto. Ou seja: esquecer a
-`014` tira **todo envio** do ar — para **toda organização**, inclusive quem
-nunca ouviu falar de conexão assistida nem de template genérico.
+com o código novo no ar e a `014` não aplicada toda consulta a essas duas
+tabelas morre com *"column ... does not exist"*. O alcance, do pior para o
+menos grave:
+
+- **Login, registro, refresh de token e recuperação de senha.**
+  `services/api-gateway/src/auth/auth.service.ts` consulta `users` **sem
+  `select`** (linhas ~41, ~94, ~140 e ~263), então o Prisma pede
+  `users.is_platform_admin` em toda autenticação e recebe
+  *"column users.is_platform_admin does not exist"*. **Ninguém entra no
+  painel** — nem para ver relatório, nem para pagar, nem para abrir chamado.
+  Quem já está com sessão aberta cai no primeiro refresh.
+- **Envio avulso e campanha.**
+  `services/api-gateway/src/messages/messages.service.ts` (linha ~38) busca o
+  template antes de enfileirar, e
+  `services/api-gateway/src/campaigns/campaigns.service.ts` faz a mesma busca
+  antes de criar a campanha. As duas quebram com
+  *"column templates.meta_name does not exist"*.
+- **A tela de templates**, pelo mesmo motivo.
+
+Isso vale para **toda organização**, inclusive quem nunca ouviu falar de
+conexão assistida nem de template genérico. Não existe "empurro agora e migro
+em cinco minutos": cinco minutos de envio parado se explica ao cliente, cinco
+minutos de login parado em produção com cliente pagante, não.
 
 O **dispatcher não protege contra isto** — o aviso do §4 acima ("o dispatcher
 se recusa a iniciar") é sobre a coluna da `012`
 (`whatsapp_channels.paused_until`, em `internal/store/store.go`); o
-dispatcher nunca consulta a tabela `templates`, então não tem como perceber
-que a `014` está faltando. Se você esquecer esta migração, o sintoma não é um
-serviço que se recusa a subir — é **500 no gateway** toda vez que um cliente
-tentar enviar.
+dispatcher nunca consulta as tabelas `templates` nem `users`, então não tem
+como perceber que a `014` está faltando. Se você esquecer esta migração, o
+sintoma não é um serviço que se recusa a subir — é **500 no gateway** já na
+tela de login.
 
 Sequência certa, na ordem:
 
 1. **Aplique a `014` com o código ANTIGO ainda rodando.** Ela é aditiva:
    acrescenta `meta_name`/`scope` a `templates` (com os índices únicos por
-   dono e por genérico da plataforma) e `is_platform_admin` a `users`. O
-   código antigo continua funcionando normalmente com ela já aplicada.
+   dono e por genérico da plataforma) e `is_platform_admin` a `users`. Login,
+   campanha e envio continuam normais com ela já aplicada — o cliente Prisma
+   antigo só pede as colunas antigas. **Uma exceção:** o `create()` antigo faz
+   `INSERT` em `templates` sem `meta_name`, que passa a ser `NOT NULL` sem
+   default, então **não crie template (nem rode o sync antigo) entre este
+   passo e o passo 3** — dá 500. A janela é de minutos.
    ```bash
-   psql "$PGURL" -f db/migrations/014_templates_por_dono.sql
+   psql "$PGURL" -v ON_ERROR_STOP=1 -f db/migrations/014_templates_por_dono.sql
    ```
-2. **Confira** que aplicou (o `psql` não deve ter impresso `ERROR`):
+   O `-v ON_ERROR_STOP=1` faz o `psql` sair com status ≠ 0 no primeiro erro;
+   sem ele, ele sai com 0 e o `ERROR` só passa rolando na tela.
+2. **Confira** que aplicou:
    ```bash
    psql "$PGURL" -c "\d templates" -c "\d users"
    ```
-3. **Só então** `git push`.
+   `meta_name` NOT NULL, `scope` NOT NULL DEFAULT `'org'`, `organization_id`
+   **nullable**, `users.is_platform_admin` presente.
+3. **Só então** `git push`. Primeiro teste de fumaça: **fazer login** — é o
+   que a coluna de `users` derruba.
+
+**Rollback:** `git revert` do merge **e**
+`ALTER TABLE templates ALTER COLUMN meta_name DROP NOT NULL;`. Sem o segundo,
+o código antigo volta com a criação de template quebrada (mesmo motivo do
+passo 1). Não tente dropar as colunas se já existir alguma linha
+`scope = 'platform'`.
 
 > Já deu `git push` antes da migração? Aplique a `014` **agora** — ela não
 > depende do código novo, e assim que ela entra as consultas voltam a
@@ -648,20 +680,64 @@ caso, olhe o log do `zaplane-gateway` (as falhas de `contarNumeros` e
 ### 12.5 Templates genéricos da plataforma
 
 Depois que o número é registrado, a conexão assistida chama `templates.sync`
-sozinha, em best-effort: se falhar, fica só um `WARN` no log do gateway
-(logger `ConexaoAssistida`) — o cliente não vê erro nem perde a conexão,
-porque a vaga já foi consumida naquele ponto. É esse sync que importa, para a
-organização recém-conectada, os templates com o prefixo dos genéricos da
-plataforma (`zaplane_...`), para o cliente conseguir disparar já no primeiro
-dia em vez de esperar a análise da Meta.
+sozinha, em best-effort: se ela não rodar, fica um `WARN` no log do gateway —
+`falhou` (exceção, logger `ConexaoAssistida`) ou `não rodou` (o caso mais
+provável: sem credencial, ou a Graph API respondeu erro; nesse caminho o
+`sync` devolve `{ synced: false, note }` em vez de lançar). Os dois casos
+aparecem no log; o cliente não vê erro nem perde a conexão, porque a vaga já
+foi consumida naquele ponto. É esse sync que importa, para a organização
+recém-conectada, os templates com o prefixo dos genéricos da plataforma
+(`zaplane_...`), para o cliente conseguir disparar já no primeiro dia em vez
+de esperar a análise da Meta.
+
+Note que o prefixo `zaplane_` só é reconhecido como genérico **quando a WABA
+sincronizada é a da plataforma**. Um cliente legado que criar um
+`zaplane_qualquer_coisa` na WABA dele não cria template de plataforma nenhum:
+o sync dele ignora o nome, como ignora qualquer template que não carregue o
+prefixo da própria organização.
 
 Quem pode **criar** um template genérico novo (`POST /templates/platform`)
 precisa estar marcado como operador da plataforma — um nível acima do `role`
 por organização (owner/admin/operator/viewer), na coluna
-`users.is_platform_admin` (migração `014`). Para ligar um:
+`users.is_platform_admin` (migração `014`).
+
+> **Pré-condição, e ela não é opcional.** A submissão do genérico à Meta usa a
+> WABA da organização **de quem chamou** a rota. Se o usuário marcado estiver
+> numa organização **sem canal ativo na WABA da plataforma**, o template nasce
+> `PENDING`, sem `meta_template_id`, **nunca submetido** — e não há como
+> consertar pelo app: não existe rota de reenvio nem `DELETE /templates/:id`,
+> recriar o mesmo nome toma 409, e a linha **já aparece na lista de todo
+> cliente assistido**. Só sai por SQL direto no banco. Escolha um usuário de
+> uma organização que tenha número na WABA da Zaplane, e confira antes:
+
+```sql
+-- 1) qual é a organização do usuário
+SELECT u.email, u.organization_id, o.name
+  FROM users u JOIN organizations o ON o.id = u.organization_id
+ WHERE u.email = 'operador@zaplane.com.br';
+
+-- 2) essa organização tem canal ATIVO na WABA da plataforma?
+--    (precisa devolver ao menos uma linha; o waba_id abaixo é o valor da
+--     variável ZAPLANE_WABA_ID do gateway — confira lá antes de copiar)
+SELECT id, waba_id, connected_via, status
+  FROM whatsapp_channels
+ WHERE organization_id = '<a organization_id do passo 1>'
+   AND status = 'active'
+   AND (connected_via = 'assisted' OR waba_id = '<ZAPLANE_WABA_ID>');
+```
+
+Só depois de o passo 2 devolver linha:
 
 ```sql
 UPDATE users SET is_platform_admin = true WHERE email = 'operador@zaplane.com.br';
+```
+
+Se um genérico morto já tiver sido criado, ele é reconhecido assim (e a
+remoção é por SQL, na mesma linha):
+
+```sql
+SELECT id, name, meta_name, category, status, meta_template_id
+  FROM templates WHERE scope = 'platform' AND meta_template_id IS NULL;
 ```
 
 > A WABA da plataforma (`1972668750117567`) já tem dois templates aprovados,

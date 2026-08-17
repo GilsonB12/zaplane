@@ -1,14 +1,20 @@
 import { NotFoundException } from '@nestjs/common';
 import { CampaignsService } from './campaigns.service';
+import { PlataformaService } from '../common/plataforma.service';
 
 // Cobre só o que a Tarefa 8 tocou em CampaignsService.create: a busca do
-// template (organização OU genérico, quando ela enxerga genérico) e o payload
-// enfileirado (meta_name, nunca o rótulo). NÃO é a suíte completa do serviço
-// — supressão, estimativa de custo e agendamento ficam fora, de propósito.
+// template (organização OU genérico, quando o CANAL escolhido enxerga genérico)
+// e o payload enfileirado (meta_name, nunca o rótulo). NÃO é a suíte completa
+// do serviço — supressão, estimativa de custo e agendamento ficam fora, de
+// propósito.
 
 const ORG = 'ORG';
 const USER = 'USER1';
-const CHANNEL = { id: 'CH1', organizationId: ORG, status: 'active' };
+// Os dois canais que uma mesma organização pode ter ao mesmo tempo: o número
+// assistido vive na WABA da Zaplane (onde o genérico existe), o legado vive na
+// WABA própria do cliente (onde ele NÃO existe — e a Meta responderia 132001).
+const CHANNEL = { id: 'CH1', organizationId: ORG, status: 'active', connectedVia: 'assisted', wabaId: 'WABA_ZAPLANE' };
+const CHANNEL_LEGADO = { id: 'CH0', organizationId: ORG, status: 'active', connectedVia: 'manual', wabaId: 'WABA_PROPRIA' };
 const CONTACT = {
   id: 'C1', organizationId: ORG, phoneE164: '+5585999999999',
   optedOut: false, consentStatus: 'granted', deletedAt: null,
@@ -46,9 +52,18 @@ const templateFindFirstFake = (templates: any[] = [ORG_TEMPLATE, GENERICO]) =>
     ),
   );
 
+// PlataformaService de verdade (só a config importa para o critério por canal).
+// Prisma nulo de propósito: se o serviço voltar a decidir pela ORGANIZAÇÃO
+// (`orgNaWabaDaPlataforma`, que consulta o banco), o teste estoura em vez de
+// passar calado — é justamente a troca que reabre o defeito.
+const plataformaReal = () => new PlataformaService(null as any, {
+  get: (k: string) => (k === 'assisted.wabaId' ? 'WABA_ZAPLANE' : undefined),
+} as any);
+
 function montar(over: any = {}) {
+  const canal = over.canal ?? CHANNEL;
   const prisma: any = {
-    whatsappChannel: { findFirst: jest.fn().mockResolvedValue(CHANNEL) },
+    whatsappChannel: { findFirst: jest.fn().mockResolvedValue(canal) },
     template: { findFirst: templateFindFirstFake() },
     contact: { findMany: jest.fn().mockResolvedValue([CONTACT]) },
     campaign: {
@@ -67,10 +82,7 @@ function montar(over: any = {}) {
     garantirCota: jest.fn().mockResolvedValue(undefined),
     ...over.quota,
   };
-  const plataforma = {
-    orgNaWabaDaPlataforma: jest.fn().mockResolvedValue(false),
-    ...over.plataforma,
-  };
+  const plataforma = over.plataforma ?? plataformaReal();
   return {
     svc: new CampaignsService(prisma as any, billing as any, quota as any, plataforma as any),
     prisma, billing, quota, plataforma,
@@ -91,32 +103,31 @@ describe('CampaignsService.create — usa o meta_name no payload', () => {
 });
 
 // Template pertence a uma WABA; um número só dispara template da WABA dele.
-// O genérico vive na WABA da Zaplane, então só quem envia por ela pode
+// O genérico vive na WABA da Zaplane, então só quem envia POR ELA pode
 // selecioná-lo — do contrário o disparo morreria na Meta.
 describe('CampaignsService.create — visibilidade do template generico', () => {
-  it('cliente que envia pela WABA da plataforma consegue selecionar um generico', async () => {
-    const { svc, prisma } = montar({
-      plataforma: { orgNaWabaDaPlataforma: jest.fn().mockResolvedValue(true) },
-    });
+  it('campanha que sai pelo canal da WABA da plataforma consegue selecionar um generico', async () => {
+    const { svc, prisma } = montar({ canal: CHANNEL });
     await expect(svc.create(ORG, USER, DTO_GENERICO)).resolves.toMatchObject({ campaignId: 'CAMP1' });
     expect(prisma.campaign.create).toHaveBeenCalled();
   });
 
-  it('cliente de WABA propria NAO consegue selecionar um generico — recusado antes de enfileirar', async () => {
-    const { svc, prisma } = montar({
-      plataforma: { orgNaWabaDaPlataforma: jest.fn().mockResolvedValue(false) },
-    });
+  it('campanha que sai por canal de WABA propria NAO seleciona generico — recusada antes de enfileirar', async () => {
+    // Esta é a organização que tem os DOIS canais: por organização ela responde
+    // "sim, estou na WABA da Zaplane", mas a campanha sem channelId cai no canal
+    // ativo mais antigo (o legado, de junho). Decidir por organização aqui
+    // deixaria passar, e a Meta devolveria 132001 — permanente, sem retry: a
+    // campanha inteira morre depois de já ter sido enfileirada.
+    const { svc, prisma } = montar({ canal: CHANNEL_LEGADO });
     await expect(svc.create(ORG, USER, DTO_GENERICO)).rejects.toBeInstanceOf(NotFoundException);
     // recusado ANTES de criar a campanha ou enfileirar qualquer mensagem
     expect(prisma.campaign.create).not.toHaveBeenCalled();
     expect(prisma.outboundMessage.createMany).not.toHaveBeenCalled();
   });
 
-  it('template da propria organizacao continua sendo encontrado nos dois casos', async () => {
-    for (const naPlataforma of [true, false]) {
-      const { svc } = montar({
-        plataforma: { orgNaWabaDaPlataforma: jest.fn().mockResolvedValue(naPlataforma) },
-      });
+  it('template da propria organizacao continua sendo encontrado pelos dois canais', async () => {
+    for (const canal of [CHANNEL, CHANNEL_LEGADO]) {
+      const { svc } = montar({ canal });
       await expect(svc.create(ORG, USER, DTO_ORG)).resolves.toMatchObject({ campaignId: 'CAMP1' });
     }
   });

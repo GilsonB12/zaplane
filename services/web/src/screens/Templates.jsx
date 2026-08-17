@@ -15,13 +15,23 @@ function NovoTemplateModal({ open, onClose, onCreated }) {
 
   async function submit() {
     setError(null);
-    if (!/^[a-z0-9_]+$/.test(form.name)) {
-      setError("Nome: use apenas minúsculas, dígitos e underscore (ex.: promo_banho).");
+    // O nome aqui é o RÓTULO que o cliente lê — acentos, espaços e maiúsculas
+    // são bem-vindos. O nome técnico enviado à Meta (prefixado por dono) é
+    // gerado pelo servidor a partir dele. A validação acompanha o DTO do
+    // gateway (@IsString @MinLength(1) @MaxLength(200)); a regra antiga
+    // (/^[a-z0-9_]+$/) recusava "Promoção de Banho" antes mesmo de enviar.
+    const nome = form.name.trim();
+    if (nome.length < 1) {
+      setError("Dê um nome ao template.");
+      return;
+    }
+    if (nome.length > 200) {
+      setError("Nome muito longo: use até 200 caracteres.");
       return;
     }
     setPending(true);
     try {
-      const r = await createTemplate({ name: form.name, category: form.category, body: form.body });
+      const r = await createTemplate({ name: nome, category: form.category, body: form.body });
       if (r?.metaWarning) console.info("[templates]", r.metaWarning);
       onCreated();
       onClose();
@@ -36,9 +46,9 @@ function NovoTemplateModal({ open, onClose, onCreated }) {
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-900/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={onClose}>
       <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 sm:max-w-lg sm:rounded-2xl sm:p-6" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-zinc-900 dark:text-white">Novo template</h3>
-        <p className="mb-4 text-[13px] text-zinc-500 dark:text-zinc-400">Será enviado à Meta para aprovação quando o canal estiver configurado.</p>
+        <p className="mb-4 text-[13px] text-zinc-500 dark:text-zinc-400">Dê o nome que fizer sentido para você — com acentos, espaços e maiúsculas. A Zaplane gera o nome técnico e envia à Meta para aprovação quando o canal estiver configurado.</p>
         <div className="space-y-3">
-          <input value={form.name} onChange={set("name")} placeholder="nome_do_template (minúsculas, _ )"
+          <input value={form.name} onChange={set("name")} maxLength={200} placeholder="Ex.: Promoção de Banho"
             className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-[#0F8C5A] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 sm:py-2" />
           <select value={form.category} onChange={set("category")}
             className="h-11 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 sm:h-auto sm:py-2">

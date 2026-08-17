@@ -534,7 +534,17 @@ export class AssistedService {
    *  número já está registrado e a vaga já foi consumida. */
   private async sincronizarTemplates(orgId: string) {
     try {
-      await this.templates.sync(orgId);
+      // O modo de falha PROVÁVEL não é exceção: `sync` devolve
+      // `{ synced: false, note }` quando não há credencial ou quando a Graph API
+      // responde erro. Descartar o retorno deixava esse caso completamente
+      // invisível — o cliente recém-conectado fica sem genérico nenhum e não há
+      // uma linha de log para investigar.
+      const r: any = await this.templates.sync(orgId);
+      if (!r?.synced) {
+        this.logger.warn(
+          `sync de templates não rodou após conectar (org ${orgId}): ${r?.note ?? 'sem detalhe'} — a organização fica sem os templates genéricos até sincronizar de novo`,
+        );
+      }
     } catch (e) {
       this.logger.warn(`sync de templates falhou após conectar (org ${orgId}): ${e}`);
     }

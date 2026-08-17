@@ -45,8 +45,9 @@ export class TemplatesService {
    *      desta mudança. Rastreado por OUTRA organização é resíduo do
    *      vazamento antigo: não atualiza, não cria — só ignora e registra.
    *   2) template novo: só vira linha se o nome começar com o prefixo desta
-   *      organização ou com o prefixo dos genéricos da plataforma. Qualquer
-   *      outro nome é template de outro cliente e é ignorado.
+   *      organização ou — e só quando a WABA lida É a da plataforma — com o
+   *      prefixo dos genéricos. Qualquer outro nome é template de outro
+   *      cliente e é ignorado.
    *
    * A resposta ao cliente só conta o que foi processado para a própria
    * organização; total/ignorados sobre a WABA inteira ficam só no log do
@@ -58,9 +59,21 @@ export class TemplatesService {
   async sync(orgId: string) {
     const credenciais = await this.resolverCredenciais(orgId);
     if (!credenciais) {
+      // Saída silenciosa: sem este WARN, "o cliente conectou e não recebeu
+      // genérico nenhum" não deixa rastro nenhum no servidor (o retorno é
+      // descartado por assisted.service.sincronizarTemplates).
+      this.logger.warn(
+        `sync org=${orgId}: nenhuma credencial da Meta utilizável (sem canal ativo, canal com placeholder de seed, ou credencial da plataforma ausente) — nada sincronizado`,
+      );
       return { synced: false, note: 'Sem canal Meta configurado nesta organização.' };
     }
-    const { wabaId, token } = credenciais;
+    // `plataforma` NÃO pode ser descartado aqui: é ele que diz se a WABA que
+    // acabamos de escolher é a da Zaplane. Sem ele, o prefixo `zaplane_` viraria
+    // autoridade em QUALQUER WABA — um cliente legado criaria `zaplane_promo` no
+    // WhatsApp Manager dele e o corpo da mensagem dele nasceria como genérico da
+    // plataforma, visível e disparável por todo cliente assistido (e ainda
+    // ocuparia o nome no índice único dos genéricos, barrando o verdadeiro).
+    const { wabaId, token, plataforma } = credenciais;
 
     // orgId vem sempre do JWT e é um UUID; se prefixoDaOrg lançar aqui é sinal
     // de dado corrompido, não de entrada de usuário. Deixa propagar (vira 500)
@@ -72,6 +85,10 @@ export class TemplatesService {
       remotos = await this.buscarRemotos(wabaId, token);
     } catch (e: any) {
       const detalhe = e?.response?.data?.error?.message ?? e?.message ?? String(e);
+      // Este é o modo de falha PROVÁVEL (a Graph API responde erro), e ele
+      // `return`a em vez de lançar — então nada acima registra. Sem esta linha,
+      // "meu template não sincroniza" não tem onde ser investigado.
+      this.logger.warn(`sync org=${orgId} waba=${wabaId}: falha ao consultar a Meta — ${erroDaMeta(e)}`);
       return { synced: false, note: `Falha ao consultar a Meta: ${detalhe}` };
     }
 
@@ -121,11 +138,17 @@ export class TemplatesService {
         continue;
       }
 
-      // 2) carrega o prefixo desta organização, ou o dos genéricos. Qualquer
-      //    outra coisa é template de outro cliente: NÃO vira linha de
-      //    ninguém — é este `continue` que fecha o vazamento.
+      // 2) carrega o prefixo desta organização, ou o dos genéricos — e este
+      //    segundo caso SÓ vale dentro da WABA da plataforma (`plataforma`).
+      //    Nada no modelo registra em qual WABA um template de escopo
+      //    'platform' vive (organization_id é nulo e não há coluna de WABA):
+      //    quem afirma que ele é da Zaplane é só o prefixo do nome, e o nome
+      //    está sob controle de quem for dono da WABA lida. Fora da WABA da
+      //    plataforma, `zaplane_x` é template comum daquele cliente e cai na
+      //    mesma regra de qualquer nome alheio: NÃO vira linha de ninguém — é
+      //    este `continue` que fecha o vazamento.
       const daOrg = r.name.startsWith(`${prefixoOrg}_`);
-      const daPlataforma = r.name.startsWith(`${PREFIXO_PLATAFORMA}_`);
+      const daPlataforma = plataforma && r.name.startsWith(`${PREFIXO_PLATAFORMA}_`);
       if (!daOrg && !daPlataforma) { ignorados++; continue; }
 
       try {
@@ -261,8 +284,23 @@ export class TemplatesService {
         (template as any).metaTemplateId = submission.id;
       } else {
         metaWarning = submission.skipped;
+        // Linha que nasce PENDING sem id da Meta é um beco sem saída pela
+        // aplicação (não há rota de reenvio nem de exclusão, e recriar o mesmo
+        // nome toma 409). Precisa aparecer no log do servidor no momento em que
+        // acontece — o cliente só vê um aviso no navegador, que fecha.
+        this.logger.warn(
+          `create org=${orgId} template=${template.id} meta_name=${template.metaName} escopo=${template.scope}: NÃO submetido à Meta — ${submission.skipped}`,
+        );
       }
     } catch (e: any) {
+      // O motivo da recusa da Meta só chegava ao console do navegador do
+      // cliente. Registrar aqui é o que torna "meu template não é aprovado"
+      // diagnosticável dias depois. Vai só o código/mensagem de erro da Meta:
+      // nunca o token (o header nunca é ecoado e o `config` do AxiosError não é
+      // serializado) e nunca o corpo do template, que é conteúdo do cliente.
+      this.logger.warn(
+        `create org=${orgId} template=${template.id} meta_name=${template.metaName} escopo=${template.scope}: falha ao submeter à Meta — ${erroDaMeta(e)}`,
+      );
       metaWarning = `Falha ao submeter à Meta: ${e?.message ?? e}. Rascunho salvo localmente.`;
     }
 
@@ -301,16 +339,14 @@ export class TemplatesService {
    *  da plataforma, não do cliente. Ler a linha do canal aqui é o que faz o
    *  cliente assistido não conseguir usar template nenhum hoje.
    *
-   *  O `daPlataforma` abaixo NÃO é `PlataformaService.orgNaWabaDaPlataforma`
-   *  reescrito na mão — são perguntas diferentes, de propósito.
-   *  `orgNaWabaDaPlataforma(orgId)` pergunta "esta ORGANIZAÇÃO tem algum canal
-   *  na WABA da plataforma" (existe count > 0 entre todos os canais dela).
-   *  Aqui a pergunta é "este CANAL, o que acabei de escolher acima (o ativo
-   *  mais antigo), é da plataforma". Uma organização com um canal assistido E
-   *  um canal legado responde `true` na primeira e pode responder `false`
-   *  aqui, dependendo de qual dos dois foi escolhido. Unificar as duas
-   *  resolveria a credencial errada — token/WABA de um canal para operação
-   *  decidida pelo outro — então não "DRY" isto com PlataformaService. */
+   *  A pergunta aqui é sobre o CANAL que acabei de escolher acima (o ativo mais
+   *  antigo), não sobre a organização — e é por isso que ela usa
+   *  `canalNaWabaDaPlataforma` e não `orgNaWabaDaPlataforma`. Uma organização
+   *  com um canal assistido E um canal legado responde `true` à pergunta por
+   *  organização e pode responder `false` aqui, dependendo de qual dos dois foi
+   *  escolhido; trocar uma pela outra resolveria a credencial errada —
+   *  token/WABA de um canal para operação decidida pelo outro. As duas moram
+   *  juntas em `PlataformaService`, com a distinção documentada lá. */
   private async resolverCredenciais(
     orgId: string,
   ): Promise<{ wabaId: string; token: string; plataforma: boolean } | null> {
@@ -322,8 +358,7 @@ export class TemplatesService {
     if (!canal) return null;
 
     const wabaPlataforma = this.config.get<string>('assisted.wabaId') || '';
-    const daPlataforma =
-      canal.connectedVia === 'assisted' || (!!wabaPlataforma && canal.wabaId === wabaPlataforma);
+    const daPlataforma = this.plataforma.canalNaWabaDaPlataforma(canal);
 
     if (daPlataforma) {
       const token = this.config.get<string>('whatsapp.accessToken') || '';
@@ -336,6 +371,25 @@ export class TemplatesService {
     if (!looksConfigured(canal.wabaId) || !looksConfigured(canal.accessTokenEnc)) return null;
     return { wabaId: canal.wabaId, token: readToken(canal.accessTokenEnc), plataforma: false };
   }
+}
+
+/** O que a operação precisa para diagnosticar uma recusa da Meta, e só isso:
+ *  código, subcódigo, mensagem e fbtrace_id (o identificador que o suporte da
+ *  Meta pede). Nunca sai daqui o token — a Meta não ecoa o header
+ *  `Authorization` e o `config` do AxiosError, que o carrega, não é serializado
+ *  — nem o corpo do template, que é conteúdo do cliente. */
+function erroDaMeta(e: any): string {
+  const err = e?.response?.data?.error;
+  if (!err) return e?.message ?? String(e);
+  return [
+    err.code != null ? `code=${err.code}` : null,
+    err.error_subcode != null ? `subcode=${err.error_subcode}` : null,
+    err.type ? `type=${err.type}` : null,
+    err.fbtrace_id ? `fbtrace_id=${err.fbtrace_id}` : null,
+    err.message ? `mensagem=${err.message}` : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 // A Meta tem mais estados (PAUSED, IN_APPEAL, PENDING_DELETION…) que o nosso

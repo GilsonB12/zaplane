@@ -31,8 +31,12 @@ export class MessagesService {
       id: dto.templateId,
       OR: [
         { organizationId: orgId },
-        // genérico só serve a quem envia pela WABA onde ele vive
-        ...((await this.plataforma.orgNaWabaDaPlataforma(orgId)) ? [{ scope: 'platform' }] : []),
+        // Genérico só serve a quem envia pela WABA onde ele vive — e a pergunta
+        // é sobre o CANAL escolhido acima, não sobre a organização. Uma
+        // organização com canal legado E número assistido responde "sim" por
+        // organização, mas se o envio sair pelo canal legado a Meta devolve
+        // 132001, que é permanente e não tem retry.
+        ...(this.plataforma.canalNaWabaDaPlataforma(channel) ? [{ scope: 'platform' }] : []),
       ],
     };
     const template = await this.prisma.template.findFirst({ where });

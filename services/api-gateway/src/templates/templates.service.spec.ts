@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { TemplatesService } from './templates.service';
+import { PlataformaService } from '../common/plataforma.service';
 import { prefixoDaOrg } from './meta-nome';
 
 const cfg = (vals: Record<string, any>) => ({ get: (k: string) => vals[k] } as any);
@@ -10,6 +11,13 @@ const COMPLETA = {
   'assisted.wabaId': 'WABA_ZAPLANE',
   assisted: { wabaId: 'WABA_ZAPLANE' },
 };
+// PlataformaService de verdade, não fake: o critério por canal é justamente o
+// que estes testes precisam exercitar. Prisma nulo de propósito — se algum
+// caminho aqui chamar `orgNaWabaDaPlataforma` (a pergunta por ORGANIZAÇÃO, que
+// é a errada depois de o canal já ter sido escolhido), o teste estoura em vez
+// de passar calado.
+const plataformaCom = (vals: Record<string, any> = COMPLETA) =>
+  new PlataformaService(null as any, cfg(vals));
 const prismaCom = (canal: any) =>
   ({ whatsappChannel: { findFirst: jest.fn().mockResolvedValue(canal) } } as any);
 
@@ -19,7 +27,7 @@ describe('TemplatesService.resolverCredenciais', () => {
   it('canal assistido usa token e WABA da plataforma', async () => {
     const s = new TemplatesService(
       prismaCom({ connectedVia: 'assisted', wabaId: 'WABA_ZAPLANE', accessTokenEnc: '' }),
-      cfg(COMPLETA), {} as any,
+      cfg(COMPLETA), plataformaCom(),
     );
     expect(await resolver(s)).toEqual({ wabaId: 'WABA_ZAPLANE', token: 'TOKEN_PLATAFORMA', plataforma: true });
   });
@@ -27,7 +35,7 @@ describe('TemplatesService.resolverCredenciais', () => {
   it('canal legado usa a WABA e o token da propria linha', async () => {
     const s = new TemplatesService(
       prismaCom({ connectedVia: 'manual', wabaId: 'WABA_CLIENTE', accessTokenEnc: 'TOKEN_CLIENTE' }),
-      cfg(COMPLETA), {} as any,
+      cfg(COMPLETA), plataformaCom(),
     );
     expect(await resolver(s)).toEqual({ wabaId: 'WABA_CLIENTE', token: 'TOKEN_CLIENTE', plataforma: false });
   });
@@ -35,28 +43,29 @@ describe('TemplatesService.resolverCredenciais', () => {
   it('canal na WABA da plataforma sem connected_via assistido tambem usa a plataforma', async () => {
     const s = new TemplatesService(
       prismaCom({ connectedVia: 'manual', wabaId: 'WABA_ZAPLANE', accessTokenEnc: '' }),
-      cfg(COMPLETA), {} as any,
+      cfg(COMPLETA), plataformaCom(),
     );
     expect((await resolver(s))?.plataforma).toBe(true);
   });
 
   it('canal assistido sem token da plataforma devolve nulo em vez de chamar a Meta com token vazio', async () => {
+    const vals = { ...COMPLETA, 'whatsapp.accessToken': '' };
     const s = new TemplatesService(
       prismaCom({ connectedVia: 'assisted', wabaId: 'WABA_ZAPLANE', accessTokenEnc: '' }),
-      cfg({ ...COMPLETA, 'whatsapp.accessToken': '' }), {} as any,
+      cfg(vals), plataformaCom(vals),
     );
     expect(await resolver(s)).toBeNull();
   });
 
   it('sem canal ativo devolve nulo', async () => {
-    const s = new TemplatesService(prismaCom(null), cfg(COMPLETA), {} as any);
+    const s = new TemplatesService(prismaCom(null), cfg(COMPLETA), plataformaCom());
     expect(await resolver(s)).toBeNull();
   });
 
   it('canal legado com placeholder de seed devolve nulo', async () => {
     const s = new TemplatesService(
       prismaCom({ connectedVia: 'manual', wabaId: 'COLOQUE_AQUI', accessTokenEnc: 'COLOQUE_AQUI' }),
-      cfg(COMPLETA), {} as any,
+      cfg(COMPLETA), plataformaCom(),
     );
     expect(await resolver(s)).toBeNull();
   });
@@ -99,14 +108,17 @@ describe('TemplatesService.sync — isolamento', () => {
     { name: 'hello_world',           language: 'en_US', status: 'APPROVED', category: 'UTILITY',   id: 'm4', components: [{ type: 'BODY', text: 'hi' }] },
   ];
 
-  function servico(orgId: string, conhecidos: any[] = []) {
+  // O canal decide QUAL WABA o sync acabou de ler — e é isso que diz se o
+  // prefixo dos genéricos vale ali. Assistido: a WABA é a da Zaplane. Legado:
+  // a WABA é do próprio cliente, que tem acesso ao WhatsApp Manager dela e
+  // portanto escolhe os nomes que quiser lá dentro.
+  const CANAL_PLATAFORMA = { connectedVia: 'assisted', wabaId: 'WABA_ZAPLANE', accessTokenEnc: '' };
+  const CANAL_LEGADO = { connectedVia: 'manual', wabaId: 'WABA_PROPRIA_DO_CLIENTE', accessTokenEnc: 'TOKEN' };
+
+  function servico(orgId: string, conhecidos: any[] = [], canal: any = CANAL_PLATAFORMA) {
     const criados: any[] = [];
     const prisma: any = {
-      whatsappChannel: {
-        findFirst: jest.fn().mockResolvedValue({
-          connectedVia: 'manual', wabaId: 'WABA_COMPARTILHADA', accessTokenEnc: 'TOKEN',
-        }),
-      },
+      whatsappChannel: { findFirst: jest.fn().mockResolvedValue(canal) },
       template: {
         findFirst: jest.fn(({ where }: any) =>
           Promise.resolve(conhecidos.find((t) => t.metaTemplateId === where.metaTemplateId) ?? null)),
@@ -114,7 +126,7 @@ describe('TemplatesService.sync — isolamento', () => {
         create: jest.fn((args: any) => { criados.push(args.data); return Promise.resolve(args.data); }),
       },
     };
-    const s = new TemplatesService(prisma, cfg(COMPLETA), {} as any);
+    const s = new TemplatesService(prisma, cfg(COMPLETA), plataformaCom());
     (s as any).buscarRemotos = jest.fn().mockResolvedValue(remotos);
     return { s, prisma, criados, orgId };
   }
@@ -133,12 +145,49 @@ describe('TemplatesService.sync — isolamento', () => {
     expect(criados.map((t) => t.metaName)).not.toContain('hello_world');
   });
 
-  it('generico entra com escopo de plataforma e sem dono', async () => {
-    const { s, criados } = servico(ORG_A);
+  it('generico entra com escopo de plataforma e sem dono — quando a WABA lida E a da plataforma', async () => {
+    const { s, criados } = servico(ORG_A, [], CANAL_PLATAFORMA);
     await s.sync(ORG_A);
     const generico = criados.find((t) => t.metaName === 'zaplane_lembrete');
     expect(generico.scope).toBe('platform');
     expect(generico.organizationId).toBeNull();
+  });
+
+  it('nome com prefixo de generico vindo de WABA que NAO e a da plataforma nao vira generico de ninguem', async () => {
+    // O caminho do vazamento: um cliente legado tem WABA própria e, por
+    // construção (ele forneceu waba_id/app_id/app_secret/token), acesso ao
+    // WhatsApp Manager dela. Ele cria lá um template chamado `zaplane_lembrete`
+    // e chama POST /templates/sync. Nada no modelo registra em qual WABA um
+    // template de escopo 'platform' vive — se o prefixo bastasse, o corpo da
+    // mensagem DELE nasceria como genérico da Zaplane, visível e disparável por
+    // todo cliente assistido, e ainda ocuparia o nome no índice único parcial
+    // dos genéricos, barrando o verdadeiro para sempre.
+    const { s, criados } = servico(ORG_A, [], CANAL_LEGADO);
+    await s.sync(ORG_A);
+
+    expect(criados.map((t) => t.metaName)).not.toContain('zaplane_lembrete');
+    expect(criados.some((t) => t.scope === 'platform')).toBe(false);
+    expect(criados.some((t) => t.organizationId === null)).toBe(false);
+    // e o template da própria organização continua entrando normalmente: a
+    // trava é sobre o prefixo dos genéricos fora da WABA da plataforma, não
+    // sobre o sync do cliente legado inteiro
+    expect(criados.map((t) => t.metaName)).toContain(`${PREFIXO_A}_promocao`);
+  });
+
+  it('generico so nasce em sync de WABA da plataforma — na WABA propria ele e apenas ignorado', async () => {
+    // Prova de contagem, complementar à anterior: o `zaplane_lembrete` da WABA
+    // alheia não vira linha nem de escopo 'org' com dono trocado — ele
+    // simplesmente cai no mesmo `ignorados` de qualquer nome sem prefixo
+    // conhecido (o `hello_world` da lista).
+    const { s: legado, criados: doLegado } = servico(ORG_A, [], CANAL_LEGADO);
+    const rLegado: any = await legado.sync(ORG_A);
+    const { s: assistido, criados: doAssistido } = servico(ORG_A, [], CANAL_PLATAFORMA);
+    const rAssistido: any = await assistido.sync(ORG_A);
+
+    expect(doLegado.map((t) => t.metaName)).toEqual([`${PREFIXO_A}_promocao`]);
+    expect(rLegado.criados).toBe(1);
+    expect(doAssistido.map((t) => t.metaName)).toEqual([`${PREFIXO_A}_promocao`, 'zaplane_lembrete']);
+    expect(rAssistido.criados).toBe(2);
   });
 
   it('template da organizacao entra com escopo org e com dono', async () => {
@@ -201,11 +250,7 @@ describe('TemplatesService.sync — isolamento', () => {
       code: 'P2002', clientVersion: '5.20.0',
     });
     const prisma: any = {
-      whatsappChannel: {
-        findFirst: jest.fn().mockResolvedValue({
-          connectedVia: 'manual', wabaId: 'WABA_COMPARTILHADA', accessTokenEnc: 'TOKEN',
-        }),
-      },
+      whatsappChannel: { findFirst: jest.fn().mockResolvedValue(CANAL_PLATAFORMA) },
       template: {
         findFirst: jest.fn().mockResolvedValue(null),
         update: jest.fn(),
@@ -216,7 +261,7 @@ describe('TemplatesService.sync — isolamento', () => {
         }),
       },
     };
-    const s = new TemplatesService(prisma, cfg(COMPLETA), {} as any);
+    const s = new TemplatesService(prisma, cfg(COMPLETA), plataformaCom());
     (s as any).buscarRemotos = jest.fn().mockResolvedValue(remotos);
 
     const r: any = await s.sync(ORG_A);
@@ -253,7 +298,7 @@ describe('TemplatesService.create', () => {
         update: jest.fn().mockResolvedValue({}),
       },
     };
-    const s = new TemplatesService(prisma, cfg(COMPLETA), {} as any);
+    const s = new TemplatesService(prisma, cfg(COMPLETA), plataformaCom());
     (s as any).submitToMeta = jest.fn().mockResolvedValue({ id: 'meta-1' });
     return { s, prisma, criado };
   }
@@ -310,7 +355,7 @@ describe('TemplatesService.create', () => {
         update: jest.fn().mockResolvedValue({}),
       },
     };
-    const s = new TemplatesService(prisma, cfg(COMPLETA), {} as any);
+    const s = new TemplatesService(prisma, cfg(COMPLETA), plataformaCom());
     (s as any).submitToMeta = jest.fn().mockResolvedValue({ id: 'meta-1' });
 
     await s.create(ORG, { ...dto, name: 'Promoção de Banho' }, { plataforma: false });
@@ -322,5 +367,90 @@ describe('TemplatesService.create', () => {
     // a checagem de duplicata barra antes de tentar submeter à Meta
     expect((s as any).submitToMeta).not.toHaveBeenCalled();
     expect(criados).toHaveLength(1);
+  });
+});
+
+// "Meu template não foi aprovado" chega dias depois, com o navegador do cliente
+// já fechado. Se o motivo só existiu no `console.info` dele e nos dois `return`
+// mudos do sync, não há onde olhar. Estes testes prendem o registro no servidor
+// — e prendem também o que NÃO pode entrar nele.
+describe('TemplatesService — rastro no servidor quando a Meta recusa', () => {
+  const ORG = 'cc96458b-1239-4906-b23b-45d27545b620';
+  const CORPO_DO_CLIENTE = 'Oi {{1}}, seu pet está pronto para buscar na Petshop Amiga';
+
+  const espiar = (s: TemplatesService) => jest.spyOn((s as any).logger, 'warn').mockImplementation(() => {});
+
+  it('sync sem credencial da Meta registra WARN em vez de sair calado', async () => {
+    const s = new TemplatesService(prismaCom(null), cfg(COMPLETA), plataformaCom());
+    const warn = espiar(s);
+    const r: any = await s.sync(ORG);
+    expect(r.synced).toBe(false);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(ORG));
+  });
+
+  it('sync que falha na chamada a Meta registra o codigo do erro dela', async () => {
+    const s = new TemplatesService(
+      prismaCom({ connectedVia: 'assisted', wabaId: 'WABA_ZAPLANE', accessTokenEnc: '' }),
+      cfg(COMPLETA), plataformaCom(),
+    );
+    (s as any).buscarRemotos = jest.fn().mockRejectedValue({
+      message: 'Request failed with status code 400',
+      response: { data: { error: { code: 190, error_subcode: 463, message: 'Session has expired' } } },
+    });
+    const warn = espiar(s);
+    const r: any = await s.sync(ORG);
+    expect(r.synced).toBe(false);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('code=190'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('subcode=463'));
+  });
+
+  it('falha ao submeter registra o codigo da Meta e NAO registra o corpo do cliente nem o token', async () => {
+    const prisma: any = {
+      whatsappChannel: { findFirst: jest.fn().mockResolvedValue({
+        connectedVia: 'assisted', wabaId: 'WABA_ZAPLANE', accessTokenEnc: '' }) },
+      template: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn((a: any) => Promise.resolve({ id: 't1', ...a.data })),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const s = new TemplatesService(prisma, cfg(COMPLETA), plataformaCom());
+    (s as any).submitToMeta = jest.fn().mockRejectedValue({
+      message: 'Request failed with status code 400',
+      response: { data: { error: { code: 100, error_subcode: 2388043, message: 'Template name is invalid' } } },
+    });
+    const warn = espiar(s);
+
+    await s.create(ORG, { name: 'Promoção de Banho', category: 'MARKETING', body: CORPO_DO_CLIENTE } as any,
+      { plataforma: false });
+
+    const registrado = warn.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(registrado).toContain('code=100');
+    expect(registrado).toContain('subcode=2388043');
+    expect(registrado).toContain('zcc96458b1239_promocao_de_banho');
+    // conteúdo do cliente e credencial da plataforma NUNCA entram no log
+    expect(registrado).not.toContain(CORPO_DO_CLIENTE);
+    expect(registrado).not.toContain('TOKEN_PLATAFORMA');
+  });
+
+  it('template que nem chega a ser submetido (sem credencial) tambem deixa rastro', async () => {
+    // É o caso da linha morta: nasce PENDING, sem id da Meta, sem rota de
+    // reenvio nem de exclusão — e antes disto acontecia em silêncio absoluto.
+    const prisma: any = {
+      whatsappChannel: { findFirst: jest.fn().mockResolvedValue(null) },
+      template: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn((a: any) => Promise.resolve({ id: 't1', ...a.data })),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const s = new TemplatesService(prisma, cfg(COMPLETA), plataformaCom());
+    const warn = espiar(s);
+
+    const r: any = await s.create(ORG, { name: 'Lembrete', category: 'UTILITY', body: 'oi' } as any,
+      { plataforma: true });
+
+    expect(r.metaWarning).toBeTruthy();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('NÃO submetido à Meta'));
   });
 });
