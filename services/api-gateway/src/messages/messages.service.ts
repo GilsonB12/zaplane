@@ -1,13 +1,20 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { BillingService } from '../billing/billing.service';
 import { QuotaService } from '../common/quota.service';
+import { PlataformaService } from '../common/plataforma.service';
 import { phoneHash } from '../common/crypto.util';
 import { normalizeBrPhone } from '../common/phone.util';
 
 @Injectable()
 export class MessagesService {
-  constructor(private prisma: PrismaService, private billing: BillingService, private quota: QuotaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private billing: BillingService,
+    private quota: QuotaService,
+    private plataforma: PlataformaService,
+  ) {}
 
   /** Envio avulso para 1 número: enfileira uma outbound_message (template).
    *  channelId é opcional: sem ele, usa o canal ativo do org (padrão A5). */
@@ -20,9 +27,15 @@ export class MessagesService {
       orderBy: { createdAt: 'asc' },
     });
     if (!channel) throw new NotFoundException('Canal não encontrado.');
-    const template = await this.prisma.template.findFirst({
-      where: { id: dto.templateId, organizationId: orgId },
-    });
+    const where: Prisma.TemplateWhereInput = {
+      id: dto.templateId,
+      OR: [
+        { organizationId: orgId },
+        // genérico só serve a quem envia pela WABA onde ele vive
+        ...((await this.plataforma.orgNaWabaDaPlataforma(orgId)) ? [{ scope: 'platform' }] : []),
+      ],
+    };
+    const template = await this.prisma.template.findFirst({ where });
     if (!template) throw new NotFoundException('Template não encontrado.');
     if (template.status !== 'APPROVED') throw new BadRequestException('Template não aprovado.');
 
@@ -40,7 +53,10 @@ export class MessagesService {
       to: e164.replace('+', ''),
       type: 'template',
       template: {
-        name: template.name,
+        // A Meta conhece o meta_name (prefixado), nunca o rótulo que o
+        // cliente lê na tela — mandar `template.name` faria a Meta responder
+        // "template não encontrado".
+        name: template.metaName,
         language: { code: template.language },
         ...(parameters.length ? { components: [{ type: 'body', parameters }] } : {}),
       },

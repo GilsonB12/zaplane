@@ -21,10 +21,7 @@ export class QuotaService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    // Default só para não quebrar quem hoje instancia QuotaService direto nos
-    // testes (sem passar um terceiro argumento); em produção o Nest injeta o
-    // singleton real de PlataformaService por tipo, via QuotaModule.
-    private readonly plataforma: PlataformaService = new PlataformaService(prisma, config),
+    private readonly plataforma: PlataformaService,
   ) {}
 
   private limite(): number {

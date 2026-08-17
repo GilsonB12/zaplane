@@ -26,7 +26,14 @@ function montar(over: any = {}) {
     garantirCota: jest.fn().mockResolvedValue(undefined),
     ...over.quota,
   };
-  return { svc: new MessagesService(prisma as any, billing as any, quota as any), prisma, billing, quota };
+  const plataforma = {
+    orgNaWabaDaPlataforma: jest.fn().mockResolvedValue(false),
+    ...over.plataforma,
+  };
+  return {
+    svc: new MessagesService(prisma as any, billing as any, quota as any, plataforma as any),
+    prisma, billing, quota, plataforma,
+  };
 }
 
 // Prova de que o envio avulso (POST /messages/send) não é uma porta de fundo
@@ -50,5 +57,18 @@ describe('MessagesService.sendSingle — cota diária de destinatários', () => 
     });
     await expect(svc.sendSingle(ORG, DTO)).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.outboundMessage.create).not.toHaveBeenCalled();
+  });
+});
+
+// O rótulo (name) é o que o cliente lê na tela; o meta_name é o que a Meta
+// conhece do template. Mandar o rótulo faria a Meta responder "template não
+// encontrado" — ela nunca ouviu falar da string que aparece na nossa UI.
+describe('MessagesService.sendSingle — usa o meta_name no payload', () => {
+  it('envia o meta_name, nunca o nome de exibicao', async () => {
+    const template = { ...TEMPLATE, name: 'Promoção', metaName: 'zcc96458b_promocao' };
+    const { svc, prisma } = montar({ prisma: { template: { findFirst: jest.fn().mockResolvedValue(template) } } });
+    await svc.sendSingle(ORG, DTO);
+    const payload = prisma.outboundMessage.create.mock.calls[0][0].data.payload;
+    expect(payload.template.name).toBe('zcc96458b_promocao');
   });
 });

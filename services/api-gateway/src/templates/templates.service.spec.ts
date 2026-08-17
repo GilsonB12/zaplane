@@ -62,6 +62,27 @@ describe('TemplatesService.resolverCredenciais', () => {
   });
 });
 
+describe('TemplatesService.findAll', () => {
+  const consulta = async (naPlataforma: boolean) => {
+    const prisma: any = { template: { findMany: jest.fn().mockResolvedValue([]) } };
+    const plataforma: any = { orgNaWabaDaPlataforma: jest.fn().mockResolvedValue(naPlataforma) };
+    const s = new TemplatesService(prisma, cfg(COMPLETA), plataforma);
+    await s.findAll('org');
+    return prisma.template.findMany.mock.calls[0][0].where;
+  };
+
+  it('cliente da WABA da plataforma ve os proprios e os genericos', async () => {
+    expect(await consulta(true)).toEqual({
+      OR: [{ organizationId: 'org' }, { scope: 'platform' }],
+    });
+  });
+
+  it('cliente de WABA propria NAO ve generico', async () => {
+    // generico vive na WABA da Zaplane; disparar de outra WABA morre na Meta
+    expect(await consulta(false)).toEqual({ organizationId: 'org' });
+  });
+});
+
 describe('TemplatesService.sync — isolamento', () => {
   const ORG_A = 'aaaaaaaa-0000-0000-0000-000000000000';
   const ORG_B = 'bbbbbbbb-0000-0000-0000-000000000000';

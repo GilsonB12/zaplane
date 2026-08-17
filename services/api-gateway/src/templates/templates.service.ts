@@ -20,8 +20,16 @@ export class TemplatesService {
     private plataforma: PlataformaService,
   ) {}
 
-  findAll(orgId: string) {
-    return this.prisma.template.findMany({ where: { organizationId: orgId }, orderBy: { name: 'asc' } });
+  /** Os templates da organização, mais os genéricos — estes só quando ela envia
+   *  pela WABA da Zaplane, que é onde os genéricos vivem. */
+  async findAll(orgId: string) {
+    const veGenericos = await this.plataforma.orgNaWabaDaPlataforma(orgId);
+    return this.prisma.template.findMany({
+      where: veGenericos
+        ? { OR: [{ organizationId: orgId }, { scope: 'platform' }] }
+        : { organizationId: orgId },
+      orderBy: { name: 'asc' },
+    });
   }
 
   /**
@@ -291,7 +299,18 @@ export class TemplatesService {
    *
    *  No canal assistido, `access_token_enc` nasce VAZIO de propósito: o token é
    *  da plataforma, não do cliente. Ler a linha do canal aqui é o que faz o
-   *  cliente assistido não conseguir usar template nenhum hoje. */
+   *  cliente assistido não conseguir usar template nenhum hoje.
+   *
+   *  O `daPlataforma` abaixo NÃO é `PlataformaService.orgNaWabaDaPlataforma`
+   *  reescrito na mão — são perguntas diferentes, de propósito.
+   *  `orgNaWabaDaPlataforma(orgId)` pergunta "esta ORGANIZAÇÃO tem algum canal
+   *  na WABA da plataforma" (existe count > 0 entre todos os canais dela).
+   *  Aqui a pergunta é "este CANAL, o que acabei de escolher acima (o ativo
+   *  mais antigo), é da plataforma". Uma organização com um canal assistido E
+   *  um canal legado responde `true` na primeira e pode responder `false`
+   *  aqui, dependendo de qual dos dois foi escolhido. Unificar as duas
+   *  resolveria a credencial errada — token/WABA de um canal para operação
+   *  decidida pelo outro — então não "DRY" isto com PlataformaService. */
   private async resolverCredenciais(
     orgId: string,
   ): Promise<{ wabaId: string; token: string; plataforma: boolean } | null> {
