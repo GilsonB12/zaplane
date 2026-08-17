@@ -165,6 +165,53 @@ Na prática, no Railway: use o **Raw Editor** das Variables para colar as duas d
 uma vez, para que um único redeploy carregue as duas. Se você salvar só a WABA,
 o serviço reinicia e **não sobe** até o token entrar.
 
+### 4.2 Ordem do deploy do isolamento de templates por dono (leia antes de dar `git push`)
+
+**A migração `014` também vai ANTES do código — mesmo motivo da `013` (§4.1),
+mas desta vez quem quebra é o envio, não só a tela de templates.**
+
+Por quê: a `014` acrescenta `meta_name` e `scope` à tabela `templates` (o
+prefixo por dono que isola quem divide a WABA da Zaplane — ver
+`docs/superpowers/specs/2026-08-17-templates-por-dono-design.md`), e
+`services/api-gateway/prisma/schema.prisma` já declara as duas colunas
+novas. Como o Prisma **nunca faz `SELECT *`** (lista as colunas uma a uma),
+com o código novo no ar e a `014` não aplicada **toda** consulta à tabela
+`templates` morre com *"column templates.meta_name does not exist"* — e essa
+consulta não acontece só na tela de templates:
+`services/api-gateway/src/messages/messages.service.ts` (linha ~38) busca o
+template antes de enfileirar um **envio avulso**, e
+`services/api-gateway/src/campaigns/campaigns.service.ts` faz a mesma busca
+antes de criar uma **campanha**. As duas quebram junto. Ou seja: esquecer a
+`014` tira **todo envio** do ar — para **toda organização**, inclusive quem
+nunca ouviu falar de conexão assistida nem de template genérico.
+
+O **dispatcher não protege contra isto** — o aviso do §4 acima ("o dispatcher
+se recusa a iniciar") é sobre a coluna da `012`
+(`whatsapp_channels.paused_until`, em `internal/store/store.go`); o
+dispatcher nunca consulta a tabela `templates`, então não tem como perceber
+que a `014` está faltando. Se você esquecer esta migração, o sintoma não é um
+serviço que se recusa a subir — é **500 no gateway** toda vez que um cliente
+tentar enviar.
+
+Sequência certa, na ordem:
+
+1. **Aplique a `014` com o código ANTIGO ainda rodando.** Ela é aditiva:
+   acrescenta `meta_name`/`scope` a `templates` (com os índices únicos por
+   dono e por genérico da plataforma) e `is_platform_admin` a `users`. O
+   código antigo continua funcionando normalmente com ela já aplicada.
+   ```bash
+   psql "$PGURL" -f db/migrations/014_templates_por_dono.sql
+   ```
+2. **Confira** que aplicou (o `psql` não deve ter impresso `ERROR`):
+   ```bash
+   psql "$PGURL" -c "\d templates" -c "\d users"
+   ```
+3. **Só então** `git push`.
+
+> Já deu `git push` antes da migração? Aplique a `014` **agora** — ela não
+> depende do código novo, e assim que ela entra as consultas voltam a
+> funcionar (o Prisma não guarda cache de schema).
+
 ## 5. Os 4 serviços
 
 Pra cada um: **New** → **GitHub Repo** (o mesmo repo) → em **Settings**,
@@ -416,6 +463,8 @@ Review:
 - [ ] Billing (Asaas) segue funcionando — teste um evento de webhook
 - [ ] `WEBHOOK_PUBLIC_URL` no gateway aponta pra `api.zaplane.com.br`
 - [ ] Migração `013` aplicada **antes** do push do código (§4.1)
+- [ ] Migração `014` aplicada **antes** do push do código (§4.2) — sem ela,
+      envio avulso e campanha quebram para **toda** organização
 - [ ] `ZAPLANE_WABA_ID` e `WHATSAPP_ACCESS_TOKEN` definidos **juntos** no gateway
 - [ ] `WHATSAPP_ACCESS_TOKEN` e `APP_ENCRYPTION_KEY` definidos também no
       dispatcher (§5.2) — sem eles o envio falha depois de o cliente ver

@@ -518,16 +518,26 @@ export class AssistedService {
       data: { status: 'concluida', channelId: canal.id },
     });
     await this.auditar(orgId, req.createdBy, 'channel.connect.registered', req.phoneHash, { canalId: canal.id });
+    await this.sincronizarTemplates(orgId);
 
-    // Traz os genéricos da plataforma para o cliente recém-conectado. Falha aqui
-    // não desfaz nada: o número já está registrado e a vaga já foi consumida.
+    return { canalId: canal.id };
+  }
+
+  /** Traz os genéricos da plataforma para o cliente recém-conectado, em
+   *  best-effort. Chamado nos DOIS pontos em que uma solicitação termina com
+   *  canal pronto para enviar — a criação nova, acima, e o reaproveitamento
+   *  em fecharSeJaExiste() logo abaixo — porque o segundo é o único caminho
+   *  que uma retentativa tem depois que o canal já existe: se o processo
+   *  morresse entre criar o canal e sincronizar (deploy, reinício, queda), a
+   *  criação nunca mais se repete, e sem a chamada aqui também o cliente
+   *  ficaria permanentemente sem os genéricos. Falha aqui não desfaz nada: o
+   *  número já está registrado e a vaga já foi consumida. */
+  private async sincronizarTemplates(orgId: string) {
     try {
       await this.templates.sync(orgId);
     } catch (e) {
       this.logger.warn(`sync de templates falhou após conectar (org ${orgId}): ${e}`);
     }
-
-    return { canalId: canal.id };
   }
 
   /** Fecha a solicitação apontando para o canal que JÁ existe nesta
@@ -548,6 +558,7 @@ export class AssistedService {
     await this.auditar(orgId, req.createdBy, 'channel.connect.registered', req.phoneHash, {
       canalId: existente.id, reaproveitado: true,
     });
+    await this.sincronizarTemplates(orgId);
     return { canalId: existente.id };
   }
 
