@@ -2,12 +2,17 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
+import { PlataformaService } from '../common/plataforma.service';
 import { decrypt } from '../common/crypto.util';
 import { CreateTemplateDto } from './dto/create-template.dto';
 
 @Injectable()
 export class TemplatesService {
-  constructor(private prisma: PrismaService, private config: ConfigService) {}
+  constructor(
+    private prisma: PrismaService,
+    private config: ConfigService,
+    private plataforma: PlataformaService,
+  ) {}
 
   findAll(orgId: string) {
     return this.prisma.template.findMany({ where: { organizationId: orgId }, orderBy: { name: 'asc' } });
@@ -20,23 +25,19 @@ export class TemplatesService {
    * Meta passam a existir localmente. Env-gated: sem canal real, não faz nada.
    */
   async sync(orgId: string) {
-    const channel = await this.prisma.whatsappChannel.findFirst({
-      where: { organizationId: orgId, status: 'active' },
-      // determinístico (oldest-first) quando houver mais de um canal ativo
-      orderBy: { createdAt: 'asc' },
-    });
-    if (!channel || !looksConfigured(channel.wabaId) || !looksConfigured(channel.accessTokenEnc)) {
+    const credenciais = await this.resolverCredenciais(orgId);
+    if (!credenciais) {
       return { synced: false, note: 'Sem canal Meta configurado nesta organização.' };
     }
+    const { wabaId, token } = credenciais;
 
     const version = this.config.get<string>('whatsapp.graphVersion');
-    const token = readToken(channel.accessTokenEnc);
 
     // GET /message_templates paginado (paging.next já vem como URL completa)
     const remotos: any[] = [];
     try {
       let url: string | undefined =
-        `https://graph.facebook.com/${version}/${channel.wabaId}/message_templates?limit=100`;
+        `https://graph.facebook.com/${version}/${wabaId}/message_templates?limit=100`;
       let paginas = 0;
       while (url && paginas < 10) {
         const { data } = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -138,28 +139,55 @@ export class TemplatesService {
     orgId: string,
     template: { name: string; language: string; category: string; body: string | null; variablesCount: number },
   ): Promise<{ id?: string; skipped?: string }> {
-    const channel = await this.prisma.whatsappChannel.findFirst({
-      where: { organizationId: orgId, status: 'active' },
-      // determinístico (oldest-first) quando houver mais de um canal ativo
-      orderBy: { createdAt: 'asc' },
-    });
-    if (!channel || !looksConfigured(channel.wabaId) || !looksConfigured(channel.accessTokenEnc)) {
+    const credenciais = await this.resolverCredenciais(orgId);
+    if (!credenciais) {
       return { skipped: 'Sem canal Meta configurado; template salvo apenas localmente.' };
     }
+    const { wabaId, token } = credenciais;
     const version = this.config.get<string>('whatsapp.graphVersion');
-    const token = readToken(channel.accessTokenEnc);
     const example =
       template.variablesCount > 0
         ? { body_text: [Array.from({ length: template.variablesCount }, (_, i) => `exemplo${i + 1}`)] }
         : undefined;
     const components: any[] = [{ type: 'BODY', text: template.body ?? '', ...(example ? { example } : {}) }];
-    const url = `https://graph.facebook.com/${version}/${channel.wabaId}/message_templates`;
+    const url = `https://graph.facebook.com/${version}/${wabaId}/message_templates`;
     const { data } = await axios.post(
       url,
       { name: template.name, language: template.language, category: template.category, components },
       { headers: { Authorization: `Bearer ${token}` } },
     );
     return { id: data?.id };
+  }
+
+  /** Qual WABA e qual token esta organização usa para falar com a Meta.
+   *
+   *  No canal assistido, `access_token_enc` nasce VAZIO de propósito: o token é
+   *  da plataforma, não do cliente. Ler a linha do canal aqui é o que faz o
+   *  cliente assistido não conseguir usar template nenhum hoje. */
+  private async resolverCredenciais(
+    orgId: string,
+  ): Promise<{ wabaId: string; token: string; plataforma: boolean } | null> {
+    const canal = await this.prisma.whatsappChannel.findFirst({
+      where: { organizationId: orgId, status: 'active' },
+      // determinístico (oldest-first) quando houver mais de um canal ativo
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!canal) return null;
+
+    const wabaPlataforma = this.config.get<string>('assisted.wabaId') || '';
+    const daPlataforma =
+      canal.connectedVia === 'assisted' || (!!wabaPlataforma && canal.wabaId === wabaPlataforma);
+
+    if (daPlataforma) {
+      const token = this.config.get<string>('whatsapp.accessToken') || '';
+      // sem credencial da plataforma, falhar fechado: chamar a Meta com token
+      // vazio devolveria erro de permissão disfarçado de erro de template
+      if (!wabaPlataforma || !token) return null;
+      return { wabaId: wabaPlataforma, token, plataforma: true };
+    }
+
+    if (!looksConfigured(canal.wabaId) || !looksConfigured(canal.accessTokenEnc)) return null;
+    return { wabaId: canal.wabaId, token: readToken(canal.accessTokenEnc), plataforma: false };
   }
 }
 
