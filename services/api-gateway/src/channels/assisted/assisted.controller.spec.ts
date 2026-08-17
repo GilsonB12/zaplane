@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { ServiceUnavailableException } from '@nestjs/common';
 import { ROLES_KEY } from '../../common/decorators/roles.decorator';
+import { PLATAFORMA_ADMIN_KEY } from '../../common/decorators/plataforma-admin.decorator';
 import { AssistedController } from './assisted.controller';
 
 const ORG = 'ORG';
@@ -28,10 +29,12 @@ describe('AssistedController — rota de reconciliação', () => {
     expect(reconciliacao.orfaos).toHaveBeenCalled();
   });
 
-  it('é restrita ao papel mais alto, sobrescrevendo o da classe', () => {
+  it('é restrita a admin de plataforma, fora do RBAC da organização', () => {
     // A resposta é operacional (varre a WABA inteira, não a organização de
-    // quem chamou), então 'admin' — que a classe permite — não basta.
-    expect(Reflect.getMetadata(ROLES_KEY, AssistedController.prototype.orfaos)).toEqual(['owner']);
+    // quem chamou): o RBAC da classe ('owner'/'admin', dentro da organização)
+    // não é a barreira certa aqui — quem decide é a flag is_platform_admin,
+    // checada pelo PlataformaAdminGuard via @PlataformaAdmin().
+    expect(Reflect.getMetadata(PLATAFORMA_ADMIN_KEY, AssistedController.prototype.orfaos)).toBe(true);
     expect(Reflect.getMetadata(ROLES_KEY, AssistedController)).toEqual(['owner', 'admin']);
   });
 });

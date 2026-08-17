@@ -6,9 +6,11 @@ import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { SubscriptionGuard } from '../../common/guards/subscription.guard';
+import { PlataformaAdminGuard } from '../../common/guards/plataforma-admin.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RequireActiveSubscription } from '../../common/decorators/subscription.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { PlataformaAdmin } from '../../common/decorators/plataforma-admin.decorator';
 import { AssistedService } from './assisted.service';
 import { ReconciliacaoService } from './reconciliacao.service';
 import { IniciarConexaoDto, ReenviarDto, VerificarCodigoDto } from './dto/iniciar.dto';
@@ -17,7 +19,7 @@ import { IniciarConexaoDto, ReenviarDto, VerificarCodigoDto } from './dto/inicia
  *  Cada chamada aqui consome recurso real — uma vaga na WABA ou um SMS de
  *  verdade — daí o throttle apertado e a exigência de assinatura ativa. */
 @Controller('channels/assisted')
-@UseGuards(JwtAuthGuard, RolesGuard, SubscriptionGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PlataformaAdminGuard, SubscriptionGuard)
 @Roles('owner', 'admin')
 export class AssistedController {
   constructor(
@@ -87,14 +89,16 @@ export class AssistedController {
    *  nenhum agendador existe no projeto e introduzir um está fora do escopo.
    *
    *  A resposta é OPERACIONAL, não do cliente: ela olha a WABA inteira, não a
-   *  organização de quem chamou. Por isso 'owner' (o papel mais alto do RBAC,
-   *  sobrescrevendo o 'owner','admin' da classe) e throttle apertado — cada
-   *  chamada varre as páginas de `{waba}/phone_numbers` na Graph API.
+   *  organização de quem chamou. O RBAC da classe ('owner','admin') não serve
+   *  de barreira aqui — é um eixo DENTRO da organização, e esta rota é sobre
+   *  a plataforma. Por isso `@PlataformaAdmin()` (checa `is_platform_admin`
+   *  no banco, não o papel do usuário) e throttle apertado — cada chamada
+   *  varre as páginas de `{waba}/phone_numbers` na Graph API.
    *  O que ela devolve são `phone_number_id`s (identificadores opacos da Meta,
    *  inúteis sem o token de System User da Zaplane): nenhum telefone, nome ou
    *  organização de outro cliente. Ver a limitação anotada no relatório. */
   @Get('orphans')
-  @Roles('owner')
+  @PlataformaAdmin()
   @Throttle({ default: { limit: 2, ttl: 60_000 } })
   async orfaos() {
     this.garantirDisponivel();
