@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { TemplatesService } from './templates.service';
 import { prefixoDaOrg } from './meta-nome';
@@ -131,14 +132,29 @@ describe('TemplatesService.sync — isolamento', () => {
     const conhecido = { id: 'local-1', metaTemplateId: 'm4', organizationId: ORG_A, scope: 'org' };
     const { s, prisma } = servico(ORG_A, [conhecido]);
     await s.sync(ORG_A);
-    // inclui metaTemplateId nos campos do update (I3): sem isso, uma linha
-    // que um dia perdeu o id (metaTemplateId nulo) e voltou a ser vista com
-    // id conhecido nunca teria essa reconciliacao registrada
+    // category/status/body vem da Meta a cada sync (é a fonte da verdade).
+    // metaTemplateId NAO entra no update: a linha só chega aqui por ter sido
+    // encontrada com `where: { metaTemplateId: r.id }`, então reescrevê-lo
+    // seria sempre o mesmo valor já gravado — reescrita inerte.
     expect(prisma.template.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'local-1' },
-        data: expect.objectContaining({ metaTemplateId: 'm4' }),
+        data: expect.objectContaining({ category: 'UTILITY', status: 'APPROVED' }),
       }),
+    );
+  });
+
+  it('generico ja rastreado continua sendo atualizado mesmo nao pertencendo a esta organizacao', async () => {
+    // m3 é o template genérico (`zaplane_lembrete`) na lista de remotos. Uma
+    // linha local já rastreada por metaTemplateId, com scope 'platform' e sem
+    // dono, tem que ser atualizada mesmo o sync estar rodando pela ORG_A —
+    // é a cláusula `scope === 'platform'` do OR que garante isso. Removê-la
+    // faria a plataforma parar de sincronizar o próprio catálogo genérico.
+    const generico = { id: 'local-generico', metaTemplateId: 'm3', organizationId: null, scope: 'platform' };
+    const { s, prisma } = servico(ORG_A, [generico]);
+    await s.sync(ORG_A);
+    expect(prisma.template.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'local-generico' } }),
     );
   });
 
@@ -199,5 +215,60 @@ describe('TemplatesService.sync — isolamento', () => {
     expect(r.criados).toBe(2);
     expect(r.total).toBe(2);
     expect(r).not.toHaveProperty('ignorados');
+  });
+});
+
+describe('TemplatesService.create', () => {
+  const ORG = 'cc96458b-1239-4906-b23b-45d27545b620';
+
+  function servico() {
+    const criado: any = {};
+    const prisma: any = {
+      whatsappChannel: { findFirst: jest.fn().mockResolvedValue({
+        connectedVia: 'assisted', wabaId: 'WABA_ZAPLANE', accessTokenEnc: '' }) },
+      template: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn((a: any) => { Object.assign(criado, a.data); return Promise.resolve({ id: 't1', ...a.data }); }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const s = new TemplatesService(prisma, cfg(COMPLETA), {} as any);
+    (s as any).submitToMeta = jest.fn().mockResolvedValue({ id: 'meta-1' });
+    return { s, prisma, criado };
+  }
+
+  const dto = { name: 'Promoção de Banho', category: 'MARKETING', body: 'Oi {{1}}' } as any;
+
+  it('grava o nome de exibicao e o meta_name prefixado', async () => {
+    const { s, criado } = servico();
+    await s.create(ORG, dto, { plataforma: false });
+    expect(criado.name).toBe('Promoção de Banho');
+    // I4 alargou o prefixo da organização de 8 para 12 caracteres hexadecimais
+    // (ver meta-nome.ts) — este valor é o prefixo de 13 caracteres, não 9.
+    expect(criado.metaName).toBe('zcc96458b1239_promocao_de_banho');
+    expect(criado.scope).toBe('org');
+    expect(criado.organizationId).toBe(ORG);
+  });
+
+  it('generico nasce sem dono e com prefixo da plataforma', async () => {
+    const { s, criado } = servico();
+    await s.create(ORG, { ...dto, name: 'Lembrete de agendamento' }, { plataforma: true });
+    expect(criado.metaName).toBe('zaplane_lembrete_de_agendamento');
+    expect(criado.scope).toBe('platform');
+    expect(criado.organizationId).toBeNull();
+  });
+
+  it('submete a Meta o meta_name, nunca o nome de exibicao', async () => {
+    const { s } = servico();
+    await s.create(ORG, dto, { plataforma: false });
+    const enviado = (s as any).submitToMeta.mock.calls[0][1];
+    expect(enviado.metaName).toBe('zcc96458b1239_promocao_de_banho');
+  });
+
+  it('nome que fica vazio depois de normalizar vira 400, sem gravar nada', async () => {
+    const { s, prisma } = servico();
+    await expect(s.create(ORG, { ...dto, name: '!!! ---' }, { plataforma: false }))
+      .rejects.toThrow(BadRequestException);
+    expect(prisma.template.create).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import axios from 'axios';
@@ -6,7 +6,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PlataformaService } from '../common/plataforma.service';
 import { decrypt } from '../common/crypto.util';
 import { CreateTemplateDto } from './dto/create-template.dto';
-import { PREFIXO_PLATAFORMA, prefixoDaOrg } from './meta-nome';
+import {
+  PREFIXO_PLATAFORMA, prefixoDaOrg, metaNomeDaOrg, metaNomeDaPlataforma, NomeInvalidoError,
+} from './meta-nome';
 
 @Injectable()
 export class TemplatesService {
@@ -77,10 +79,14 @@ export class TemplatesService {
 
       const body: string | null =
         (r.components ?? []).find((c: any) => c?.type === 'BODY')?.text ?? null;
+      // metaTemplateId NÃO entra aqui: quando existe `conhecido` (abaixo), ele
+      // só foi encontrado por `where: { metaTemplateId: r.id }` — ou seja, já
+      // é igual a r.id. Reescrevê-lo no update seria sempre o mesmo valor já
+      // gravado. Ele só importa em create(), onde inicializa o id pela
+      // primeira vez (ali é passado à parte, como `r.id ?? null`).
       const campos = {
         category: r.category ?? 'MARKETING',
         status: statusLocal(r.status),
-        metaTemplateId: r.id ?? null,
         ...(body != null ? { body, variablesCount: countVariables(body) } : {}),
       };
 
@@ -126,7 +132,7 @@ export class TemplatesService {
             variablesCount: body != null ? countVariables(body) : 0,
             category: campos.category,
             status: campos.status,
-            metaTemplateId: campos.metaTemplateId,
+            metaTemplateId: r.id ?? null,
           },
         });
         criados++;
@@ -175,21 +181,46 @@ export class TemplatesService {
     return remotos;
   }
 
-  async create(orgId: string, dto: CreateTemplateDto) {
+  /** Cria um template. `opts.plataforma` vem da rota (Post / vs. Post
+   *  /platform), nunca do corpo — mesmo motivo pelo qual `organizationId`
+   *  vem do JWT: dado que decide autorização não vem do body.
+   *
+   *  Caso genérico (`plataforma: true`): `orgId` ainda é necessário para
+   *  `submitToMeta` achar a WABA via `resolverCredenciais`, mas ele NÃO vira
+   *  dono do template — `organizationId` fica nulo e `scope` fica
+   *  'platform'. O CHECK do banco (`templates_escopo_dono_check`) rejeita as
+   *  duas combinações erradas, então um engano aqui vira erro de constraint,
+   *  não corrupção silenciosa. */
+  async create(orgId: string, dto: CreateTemplateDto, opts: { plataforma: boolean }) {
     const language = dto.language ?? 'pt_BR';
     const variablesCount = countVariables(dto.body);
 
-    const exists = await this.prisma.template.findFirst({
-      where: { organizationId: orgId, name: dto.name, language },
-    });
+    let metaName: string;
+    try {
+      metaName = opts.plataforma
+        ? metaNomeDaPlataforma(dto.name)
+        : metaNomeDaOrg(orgId, dto.name);
+    } catch (e) {
+      if (e instanceof NomeInvalidoError) {
+        throw new BadRequestException(
+          'Dê ao template um nome com letras ou números.',
+        );
+      }
+      throw e;
+    }
+
+    const where: Prisma.TemplateWhereInput = opts.plataforma
+      ? { scope: 'platform', name: dto.name, language }
+      : { organizationId: orgId, name: dto.name, language };
+    const exists = await this.prisma.template.findFirst({ where });
     if (exists) throw new ConflictException('Já existe um template com esse nome e idioma.');
 
     const template = await this.prisma.template.create({
       data: {
-        organizationId: orgId,
+        organizationId: opts.plataforma ? null : orgId,
+        scope: opts.plataforma ? 'platform' : 'org',
         name: dto.name,
-        // TODO(templates-por-dono): idem — sem prefixo por organização ainda.
-        metaName: dto.name,
+        metaName,
         language,
         category: dto.category,
         status: 'PENDING',
@@ -220,7 +251,7 @@ export class TemplatesService {
 
   private async submitToMeta(
     orgId: string,
-    template: { name: string; language: string; category: string; body: string | null; variablesCount: number },
+    template: { metaName: string; language: string; category: string; body: string | null; variablesCount: number },
   ): Promise<{ id?: string; skipped?: string }> {
     const credenciais = await this.resolverCredenciais(orgId);
     if (!credenciais) {
@@ -234,9 +265,11 @@ export class TemplatesService {
         : undefined;
     const components: any[] = [{ type: 'BODY', text: template.body ?? '', ...(example ? { example } : {}) }];
     const url = `https://graph.facebook.com/${version}/${wabaId}/message_templates`;
+    // À Meta vai sempre o meta_name (prefixado e único na WABA), nunca o
+    // rótulo que o cliente lê — é o `name` do DTO/registro local.
     const { data } = await axios.post(
       url,
-      { name: template.name, language: template.language, category: template.category, components },
+      { name: template.metaName, language: template.language, category: template.category, components },
       { headers: { Authorization: `Bearer ${token}` } },
     );
     return { id: data?.id };
