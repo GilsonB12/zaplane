@@ -1,7 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { BillingService } from '../billing/billing.service';
 import { QuotaService } from '../common/quota.service';
+import { PlataformaService } from '../common/plataforma.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { QueryCampaignsDto } from './dto/query-campaigns.dto';
 
@@ -17,7 +19,12 @@ const RATE_CENTS: Record<string, number> = {
 
 @Injectable()
 export class CampaignsService {
-  constructor(private prisma: PrismaService, private billing: BillingService, private quota: QuotaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private billing: BillingService,
+    private quota: QuotaService,
+    private plataforma: PlataformaService,
+  ) {}
 
   async create(orgId: string, userId: string, dto: CreateCampaignDto) {
     // fallback: usa o canal ativo do org quando channelId não é informado
@@ -30,9 +37,19 @@ export class CampaignsService {
     });
     if (!channel) throw new NotFoundException('Canal WhatsApp não encontrado.');
 
-    const template = await this.prisma.template.findFirst({
-      where: { id: dto.templateId, organizationId: orgId },
-    });
+    const where: Prisma.TemplateWhereInput = {
+      id: dto.templateId,
+      OR: [
+        { organizationId: orgId },
+        // Genérico só serve a quem envia pela WABA onde ele vive — e a pergunta
+        // é sobre o CANAL escolhido acima, não sobre a organização. Uma
+        // organização com canal legado E número assistido responde "sim" por
+        // organização, mas se a campanha sair pelo canal legado a Meta devolve
+        // 132001 (permanente, sem retry: a campanha inteira morre).
+        ...(this.plataforma.canalNaWabaDaPlataforma(channel) ? [{ scope: 'platform' }] : []),
+      ],
+    };
+    const template = await this.prisma.template.findFirst({ where });
     if (!template) throw new NotFoundException('Template não encontrado.');
     if (template.status !== 'APPROVED') {
       throw new BadRequestException('Template ainda não aprovado pela Meta.');
@@ -240,7 +257,10 @@ export class CampaignsService {
       to: contact.phoneE164.replace('+', ''),
       type: 'template',
       template: {
-        name: template.name,
+        // A Meta conhece o meta_name (prefixado), nunca o rótulo que o
+        // cliente lê na tela — mandar `template.name` faria a Meta responder
+        // "template não encontrado".
+        name: template.metaName,
         language: { code: template.language },
         ...(components.length ? { components } : {}),
       },

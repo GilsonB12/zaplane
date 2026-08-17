@@ -114,8 +114,10 @@ GET    /lists                         listas e segmentos
 POST   /lists                         { name, type: static|dynamic, rule? }
 POST   /lists/:id/contacts            adiciona contatos a uma lista estática
 
-GET    /templates                     templates sincronizados da Meta
-POST   /templates/sync                puxa status de aprovação da Meta
+GET    /templates                     templates da organização + genéricos da plataforma
+POST   /templates                     cria um template e submete à Meta { name, category, body }
+POST   /templates/platform            cria um genérico da Zaplane (só operador de plataforma)
+POST   /templates/sync                puxa status/categoria/corpo da Meta (owner/admin)
 
 POST   /campaigns                     cria + enfileira disparo
 GET    /campaigns/:id                 progresso (queued/sent/delivered/failed)
@@ -137,7 +139,14 @@ GET    /privacy/data-requests/:id     status da solicitação LGPD
    token* permanente para produção) e defina um **verify token** para o webhook.
 3. Configure o webhook para `https://SEU_DOMINIO/api/v1/webhooks/whatsapp` e assine os
    campos `messages`. Em dev, exponha o gateway com um túnel (ex.: `cloudflared`/`ngrok`).
-4. Cadastre e **aprove templates** (Marketing/Utility/Authentication) no painel da Meta.
+4. **Crie os templates pela Zaplane** (`POST /templates`, ou a tela de templates do
+   painel), não pelo WhatsApp Manager. O nome que vai à Meta é prefixado por dono
+   (`z<12 hex da organização>_...`), e é esse prefixo que isola quem divide uma mesma
+   WABA. Um template cadastrado à mão no painel da Meta **não carrega prefixo nenhum e
+   é ignorado para sempre** pelo `POST /templates/sync` — ele só adota nomes com o
+   prefixo da própria organização (ou, dentro da WABA da plataforma, o prefixo
+   `zaplane_` dos genéricos). A aprovação continua sendo da Meta; o `sync` traz o
+   status/categoria/corpo de volta.
 5. Preencha o `.env` dos serviços `api-gateway` e `dispatcher`:
    ```
    WHATSAPP_GRAPH_API_VERSION=v21.0     # bump conforme a Meta avança (v22/v23...)

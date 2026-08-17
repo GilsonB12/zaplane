@@ -43,7 +43,8 @@ function montar(over: any = {}) {
     ...over.meta,
   };
   const config = { get: (k: string) => (k === 'assisted' ? CFG : undefined) };
-  return { svc: new AssistedService(prisma as any, config as any, meta as any), prisma, meta };
+  const templates = { sync: jest.fn().mockResolvedValue({ synced: true, total: 0, atualizados: 0, criados: 0 }), ...over.templates };
+  return { svc: new AssistedService(prisma as any, config as any, meta as any, templates as any), prisma, meta, templates };
 }
 
 const DTO = { telefone: '(85) 99999-9999', nomeExibicao: 'Loja do Zé', aceitouPreRequisito: true };
@@ -313,6 +314,7 @@ describe('AssistedService.verificar', () => {
         ...over.prisma,
       },
       meta: over.meta,
+      templates: over.templates,
     });
 
   it('nunca persiste o código de 6 dígitos', async () => {
@@ -466,7 +468,7 @@ describe('AssistedService.verificar', () => {
     const colisao = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
       code: 'P2002', clientVersion: '5.20.0',
     });
-    const { svc, prisma } = comReq({
+    const { svc, prisma, templates } = comReq({
       prisma: {
         whatsappChannel: {
           count: jest.fn(),
@@ -482,6 +484,34 @@ describe('AssistedService.verificar', () => {
     const auditoria = (prisma.$executeRaw as jest.Mock).mock.calls
       .find((args: any[]) => args[3] === 'channel.connect.registered');
     expect(JSON.parse(auditoria![5])).toEqual({ canalId: 'CANAL_JA_EXISTE', reaproveitado: true });
+    // este é o ÚNICO caminho de sync de uma retentativa que já encontra o
+    // canal pronto: se o processo tivesse morrido entre criar o canal e
+    // sincronizar na tentativa original, é por AQUI que a organização
+    // recuperaria os genéricos — sem isso ficaria sem eles para sempre.
+    expect(templates.sync).toHaveBeenCalledWith(ORG);
+  });
+
+  it('retentativa que reaproveita canal (fecharSeJaExiste): falha do sync de templates nao derruba a operacao', async () => {
+    // Mesma garantia do caminho principal, agora no caminho de retentativa —
+    // é aqui que a organização recai se o processo tiver morrido entre criar
+    // o canal e sincronizar na tentativa que criou o canal de fato.
+    const colisao = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002', clientVersion: '5.20.0',
+    });
+    const avisoLog = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined as any);
+    const { svc } = comReq({
+      prisma: {
+        whatsappChannel: {
+          count: jest.fn(),
+          findFirst: jest.fn().mockResolvedValue({ id: 'CANAL_JA_EXISTE', organizationId: ORG }),
+          create: jest.fn().mockRejectedValue(colisao),
+        },
+      },
+      templates: { sync: jest.fn().mockRejectedValue(new Error('meta fora')) },
+    });
+    await expect(svc.verificar(ORG, 'REQ', '123456')).resolves.toEqual({ canalId: 'CANAL_JA_EXISTE' });
+    expect(avisoLog).toHaveBeenCalledWith(expect.stringContaining('sync de templates falhou'));
+    avisoLog.mockRestore();
   });
 
   it('número já em OUTRA organização vira 400 do catálogo, com error_code e log — nunca 500', async () => {
@@ -573,7 +603,7 @@ describe('AssistedService.verificar', () => {
   // as asserções abaixo indexam os argumentos da chamada, e não tentam casar
   // por substring de SQL.
   it('grava channel.connect.registered com o hash do telefone (nao com dado sensivel) e o canalId em metadata', async () => {
-    const { svc, prisma } = comReq({
+    const { svc, prisma, templates } = comReq({
       prisma: {
         whatsappChannel: {
           count: jest.fn(), findFirst: jest.fn().mockResolvedValue(null),
@@ -588,6 +618,19 @@ describe('AssistedService.verificar', () => {
     // resource_id (4º valor interpolado) é o HASH, nunca o telefone/dado sensível
     expect(registrado![4]).toBe('HASH_FIXO_REQ');
     expect(JSON.parse(registrado![5])).toEqual({ canalId: 'CANAL_XYZ' });
+    // traz os genéricos da plataforma para o cliente recém-conectado
+    expect(templates.sync).toHaveBeenCalledWith(ORG);
+  });
+
+  it('falha do sync de templates nao derruba a conexao', async () => {
+    // A vaga já foi consumida na Meta neste ponto do fluxo — falha ao trazer
+    // os templates genéricos não pode virar erro para o cliente nem desfazer
+    // a conexão, ou ele tentaria de novo e queimaria outra vaga.
+    const avisoLog = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined as any);
+    const { svc } = comReq({ templates: { sync: jest.fn().mockRejectedValue(new Error('meta fora')) } });
+    await expect(svc.verificar(ORG, 'REQ', '123456')).resolves.toEqual({ canalId: 'CANAL1' });
+    expect(avisoLog).toHaveBeenCalledWith(expect.stringContaining('sync de templates falhou'));
+    avisoLog.mockRestore();
   });
 
   it('grava channel.connect.verify_failed com o hash do telefone, as tentativas e o codigo numerico da Meta', async () => {

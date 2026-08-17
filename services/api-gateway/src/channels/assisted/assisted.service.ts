@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { randomInt } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TemplatesService } from '../../templates/templates.service';
 import { decrypt, encrypt, phoneHash } from '../../common/crypto.util';
 import { MetaNumerosClient } from './meta-numeros.client';
 import { normalizarTelefoneBR, mascarar, TelefoneInvalidoError } from './telefone';
@@ -35,6 +36,7 @@ export class AssistedService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly meta: MetaNumerosClient,
+    private readonly templates: TemplatesService,
   ) {}
 
   private cfg() {
@@ -516,7 +518,36 @@ export class AssistedService {
       data: { status: 'concluida', channelId: canal.id },
     });
     await this.auditar(orgId, req.createdBy, 'channel.connect.registered', req.phoneHash, { canalId: canal.id });
+    await this.sincronizarTemplates(orgId);
+
     return { canalId: canal.id };
+  }
+
+  /** Traz os genéricos da plataforma para o cliente recém-conectado, em
+   *  best-effort. Chamado nos DOIS pontos em que uma solicitação termina com
+   *  canal pronto para enviar — a criação nova, acima, e o reaproveitamento
+   *  em fecharSeJaExiste() logo abaixo — porque o segundo é o único caminho
+   *  que uma retentativa tem depois que o canal já existe: se o processo
+   *  morresse entre criar o canal e sincronizar (deploy, reinício, queda), a
+   *  criação nunca mais se repete, e sem a chamada aqui também o cliente
+   *  ficaria permanentemente sem os genéricos. Falha aqui não desfaz nada: o
+   *  número já está registrado e a vaga já foi consumida. */
+  private async sincronizarTemplates(orgId: string) {
+    try {
+      // O modo de falha PROVÁVEL não é exceção: `sync` devolve
+      // `{ synced: false, note }` quando não há credencial ou quando a Graph API
+      // responde erro. Descartar o retorno deixava esse caso completamente
+      // invisível — o cliente recém-conectado fica sem genérico nenhum e não há
+      // uma linha de log para investigar.
+      const r: any = await this.templates.sync(orgId);
+      if (!r?.synced) {
+        this.logger.warn(
+          `sync de templates não rodou após conectar (org ${orgId}): ${r?.note ?? 'sem detalhe'} — a organização fica sem os templates genéricos até sincronizar de novo`,
+        );
+      }
+    } catch (e) {
+      this.logger.warn(`sync de templates falhou após conectar (org ${orgId}): ${e}`);
+    }
   }
 
   /** Fecha a solicitação apontando para o canal que JÁ existe nesta
@@ -537,6 +568,7 @@ export class AssistedService {
     await this.auditar(orgId, req.createdBy, 'channel.connect.registered', req.phoneHash, {
       canalId: existente.id, reaproveitado: true,
     });
+    await this.sincronizarTemplates(orgId);
     return { canalId: existente.id };
   }
 

@@ -26,13 +26,30 @@ O gateway usa Prisma só como client; o schema é **SQL cru**. O build **não** 
 Pegue a **DATABASE_URL pública** do Postgres do Railway e rode localmente:
 
 ```bash
-psql "postgresql://postgres:SENHA@HOST-PUBLICO.railway.app:PORTA/railway" \
-  -f db/migrations/001_init.sql
-# opcional, dados de teste:
-# psql "...railway" -f db/migrations/002_seed_dev.sql
+PGURL="postgresql://postgres:SENHA@HOST-PUBLICO.railway.app:PORTA/railway"
+
+# aplica TODAS as migrações em ordem (001, 003, 004 … 014)
+for f in db/migrations/*.sql; do
+  # o 002 é seed de desenvolvimento: fora do laço, e NÃO vai para produção
+  case "$f" in */002_seed_dev.sql) continue;; esac
+  echo "== $f"
+  psql "$PGURL" -v ON_ERROR_STOP=1 -f "$f" || break
+done
 ```
 
-Migrações futuras são **aditivas** (`00X_*.sql`) — aplique cada novo arquivo do mesmo jeito.
+Aplicar só a `001_init.sql` não basta — o gateway usa Prisma, que lista as colunas uma a
+uma e pede as das migrações seguintes em toda consulta.
+
+O laço acima é para banco **novo, do zero**: a `001_init.sql` cria as tabelas sem
+`IF NOT EXISTS`, então rodá-la de novo num banco que já a tem falha (e o `|| break`
+interrompe ali). Num banco que já está em produção, aplique **só os arquivos novos**, um a
+um — migrações futuras são **aditivas** (`00X_*.sql`) e numeradas com 3 dígitos, então a
+ordem alfabética é a ordem de aplicação. Ver `docs/RAILWAY-MIGRATION.md` para a ordem de
+deploy de cada migração em relação ao código, que às vezes importa.
+
+> `002_seed_dev.sql` é **dado de exemplo, não produção** — por isso ele fica fora do laço.
+> Num banco descartável de teste, rode-o **por último**, depois de todas as migrações: ele
+> grava colunas que só existem a partir da `014`.
 
 ## 3. Criar os 3 serviços a partir do monorepo
 

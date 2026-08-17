@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { PlataformaService } from './plataforma.service';
 
 /** Cota diária de destinatários únicos por organização.
  *
@@ -17,48 +18,22 @@ import { PrismaService } from '../prisma/prisma.service';
  *  a cota é decidida por organização, em sujeitaACota(). */
 @Injectable()
 export class QuotaService {
-  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+    private readonly plataforma: PlataformaService,
+  ) {}
 
   private limite(): number {
     return this.config.get<any>('assisted')?.orgDailyQuota ?? 200;
   }
 
-  /** A organização tem ao menos um número dentro da WABA da Zaplane?
-   *
-   *  Discriminador igual ao de webhooks.service.ts (handleAccountAlert), que
-   *  usa `assisted.wabaId` para separar a WABA compartilhada da plataforma da
-   *  WABA dedicada de um cliente legado.
-   *
-   *  Duas bordas, e a escolha segura de cada uma:
-   *
-   *  1) `assisted.wabaId` vazio/ausente (ZAPLANE_WABA_ID não definido — que é
-   *     o estado do Railway hoje). Comparar com '' não casa com nada: a trava
-   *     sumiria para TODO mundo, inclusive para quem realmente divide o
-   *     portfólio. Aplicar a todos também não serve — voltaria a punir a WABA
-   *     própria. Então o vínculo com a plataforma é reconhecido também por
-   *     `connected_via = 'assisted'`, que é gravado na PRÓPRIA linha do canal
-   *     no momento em que ele nasce (assisted.service.ts) e não depende de
-   *     variável de ambiente nenhuma. Com a variável definida, os dois
-   *     critérios apontam para o mesmo conjunto; sem ela, o registro do banco
-   *     segura a trava de pé exatamente para quem precisa dela.
-   *
-   *  2) Organização sem canal nenhum: sem cota. Ela não compartilha
-   *     capacidade porque não tem número, e na prática nem chega aqui — tanto
-   *     CampaignsService quanto MessagesService resolvem o canal (e falham sem
-   *     ele) antes de chamar garantirCota.
-   *
-   *  Sem filtro de `status` de propósito: a vaga do número na WABA da Zaplane
-   *  não volta por API, então um canal assistido desativado continua sendo um
-   *  número da plataforma — na dúvida, mantém a cota. */
+  /** A organização tem ao menos um número dentro da WABA da Zaplane? Delega
+   *  para PlataformaService — a mesma pergunta de segurança que decide quem
+   *  enxerga os templates genéricos. As bordas do predicado estão documentadas
+   *  lá, não aqui. */
   async sujeitaACota(orgId: string): Promise<boolean> {
-    const wabaId = this.config.get<string>('assisted.wabaId') || '';
-    const naPlataforma = await this.prisma.whatsappChannel.count({
-      where: {
-        organizationId: orgId,
-        OR: [...(wabaId ? [{ wabaId }] : []), { connectedVia: 'assisted' }],
-      },
-    });
-    return naPlataforma > 0;
+    return this.plataforma.orgNaWabaDaPlataforma(orgId);
   }
 
   /** Quantos destinatários únicos ainda cabem nas próximas 24h, ou `null`

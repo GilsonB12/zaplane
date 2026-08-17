@@ -1,6 +1,9 @@
 import 'reflect-metadata';
 import { ServiceUnavailableException } from '@nestjs/common';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { ROLES_KEY } from '../../common/decorators/roles.decorator';
+import { PLATAFORMA_ADMIN_KEY } from '../../common/decorators/plataforma-admin.decorator';
+import { PlataformaAdminGuard } from '../../common/guards/plataforma-admin.guard';
 import { AssistedController } from './assisted.controller';
 
 const ORG = 'ORG';
@@ -28,11 +31,25 @@ describe('AssistedController — rota de reconciliação', () => {
     expect(reconciliacao.orfaos).toHaveBeenCalled();
   });
 
-  it('é restrita ao papel mais alto, sobrescrevendo o da classe', () => {
+  it('é restrita a admin de plataforma, fora do RBAC da organização', () => {
     // A resposta é operacional (varre a WABA inteira, não a organização de
-    // quem chamou), então 'admin' — que a classe permite — não basta.
-    expect(Reflect.getMetadata(ROLES_KEY, AssistedController.prototype.orfaos)).toEqual(['owner']);
+    // quem chamou): o RBAC da classe ('owner'/'admin', dentro da organização)
+    // não é a barreira certa aqui — quem decide é a flag is_platform_admin,
+    // checada pelo PlataformaAdminGuard via @PlataformaAdmin().
+    expect(Reflect.getMetadata(PLATAFORMA_ADMIN_KEY, AssistedController.prototype.orfaos)).toBe(true);
     expect(Reflect.getMetadata(ROLES_KEY, AssistedController)).toEqual(['owner', 'admin']);
+  });
+
+  it('anexa o PlataformaAdminGuard no @UseGuards da classe', () => {
+    // O metadado do decorador acima não basta: o RolesGuard devolve `true` para
+    // qualquer rota marcada com @PlataformaAdmin(), delegando a decisão ao
+    // PlataformaAdminGuard — que NÃO é APP_GUARD, é anexado à mão aqui. Sem
+    // esta afirmação, tirá-lo do @UseGuards deixava `tsc` limpo e a suíte verde
+    // com GET /channels/assisted/orphans aberta para qualquer autenticado (e
+    // ainda MAIS aberta do que antes, porque a saída do RolesGuard também
+    // dispensa o @Roles da classe).
+    const guards = Reflect.getMetadata(GUARDS_METADATA, AssistedController) ?? [];
+    expect(guards).toContain(PlataformaAdminGuard);
   });
 });
 

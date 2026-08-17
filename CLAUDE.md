@@ -104,9 +104,19 @@ scripts/              sample-contacts.csv / .json
 Pré-requisitos via winget: PostgreSQL 15, Node LTS, Go, Python 3.12. Depois:
 
 ```bash
-# Banco
-createdb zaplane && psql -d zaplane -f db/migrations/001_init.sql
-psql -d zaplane -f db/migrations/002_seed_dev.sql    # opcional
+# Banco DO ZERO: aplica TODAS as migrações em ordem (001, 003, 004 … 014). Os
+# arquivos são numerados com 3 dígitos, então a ordem do glob é a ordem certa e
+# migração nova entra no laço sozinha. O 002 é PULADO: é seed, não schema. Em
+# banco que já existe, aplique só os arquivos novos — a 001 não é idempotente.
+createdb zaplane
+for f in db/migrations/*.sql; do
+  case "$f" in */002_seed_dev.sql) continue;; esac
+  echo "== $f"; psql -d zaplane -v ON_ERROR_STOP=1 -f "$f" || break
+done
+
+# Dados de exemplo (opcional). Vai por ÚLTIMO: o seed grava colunas que só
+# existem depois da 014. Não quer dado de exemplo? Basta não rodar esta linha.
+psql -d zaplane -v ON_ERROR_STOP=1 -f db/migrations/002_seed_dev.sql
 
 # API Gateway (:3000)
 cd services/api-gateway && cp .env.example .env && npm install && npx prisma generate && npm run start:dev
