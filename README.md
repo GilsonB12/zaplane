@@ -107,11 +107,28 @@ winget install Python.Python.3.12
 ### 2. Banco de dados
 
 ```bash
-# cria o banco e aplica o schema
+# cria o banco e aplica TODAS as migrações, em ordem (001, 003, 004 … 014)
 createdb zaplane
-psql -d zaplane -f db/migrations/001_init.sql
-psql -d zaplane -f db/migrations/002_seed_dev.sql   # dados de exemplo (opcional)
+for f in db/migrations/*.sql; do
+  # o 002 é seed, não schema: fica de fora do laço e vai por último
+  case "$f" in */002_seed_dev.sql) continue;; esac
+  echo "== $f"
+  psql -d zaplane -v ON_ERROR_STOP=1 -f "$f" || break
+done
+
+# dados de exemplo (opcional) — depende do schema completo acima
+psql -d zaplane -v ON_ERROR_STOP=1 -f db/migrations/002_seed_dev.sql
 ```
+
+> Aplicar só a `001_init.sql` **não** basta: o gateway usa Prisma, que lista as colunas
+> uma a uma e pede as das migrações seguintes em toda consulta. Os arquivos são numerados
+> com 3 dígitos, então a ordem alfabética do glob é a ordem de aplicação, e migrações
+> novas entram no laço sozinhas. O `-v ON_ERROR_STOP=1` faz o `psql` parar no primeiro
+> erro em vez de sair com status 0 e deixar o `ERROR` passar rolando.
+>
+> O laço é para banco **do zero**. Se você já tem o `zaplane` criado e só quer as
+> migrações que chegaram depois, aplique **apenas os arquivos novos** — a `001_init.sql`
+> cria as tabelas sem `IF NOT EXISTS` e falha se rodar duas vezes.
 
 ### 3. API Gateway (NestJS) — :3000
 
