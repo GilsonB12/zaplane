@@ -209,11 +209,23 @@ export class TemplatesService {
       throw e;
     }
 
+    // A duplicata é checada pelo meta_name (o que precisa ser único, porque é
+    // o que vai para a Meta), não pelo rótulo (dto.name): "Promoção de Banho"
+    // e "PROMOÇÃO DE BANHO!!!" são rótulos diferentes que normalizam para o
+    // mesmo meta_name — comparar só o rótulo deixava os dois passarem e a
+    // colisão só estourava (silenciosamente, porque a submissão é
+    // best-effort) ao chegar na Meta.
     const where: Prisma.TemplateWhereInput = opts.plataforma
-      ? { scope: 'platform', name: dto.name, language }
-      : { organizationId: orgId, name: dto.name, language };
+      ? { scope: 'platform', metaName, language }
+      : { organizationId: orgId, metaName, language };
     const exists = await this.prisma.template.findFirst({ where });
-    if (exists) throw new ConflictException('Já existe um template com esse nome e idioma.');
+    if (exists) {
+      // O cliente digitou o rótulo, não o meta_name — "já existe um template
+      // com esse nome" soaria estranho se ele estiver olhando dois rótulos
+      // visivelmente diferentes na tela. "Equivalente" não presume que ele
+      // saiba que existe normalização por trás.
+      throw new ConflictException('Já existe um template equivalente a este nome nesse idioma.');
+    }
 
     const template = await this.prisma.template.create({
       data: {

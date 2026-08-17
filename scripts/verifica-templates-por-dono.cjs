@@ -81,6 +81,21 @@ const violouUnico = (e, indice) =>
        VALUES ($1,'promoção','zbbbbbbbb_promocao','org','MARKETING')`, [org2]);
     check('duas organizações podem ter o mesmo nome de exibição', true);
 
+    // mesmo meta_name na mesma organização é rejeitado, mesmo com rótulo
+    // (name) diferente — é o achado do revisor: "Promoção de Banho" e
+    // "PROMOÇÃO DE BANHO!!!" normalizam para o mesmo meta_name
+    await c.query('SAVEPOINT s4');
+    erro = null;
+    try {
+      await c.query(
+        `INSERT INTO templates (organization_id, name, meta_name, scope, category)
+         VALUES ($1,'PROMOÇÃO!!!','zaaaaaaaa_promocao','org','MARKETING')`, [org]);
+    } catch (e) { erro = e; }
+    await c.query('ROLLBACK TO SAVEPOINT s4');
+    check('mesmo meta_name na mesma organização é rejeitado, mesmo com rótulo diferente',
+      violouUnico(erro, 'templates_organization_id_meta_name_language_key'),
+      erro ? `${erro.code}/${erro.constraint}` : 'nenhum erro');
+
     // os templates que já existiam ganharam meta_name
     const semMeta = await c.query(
       `SELECT count(*)::int n FROM templates WHERE meta_name IS NULL`);

@@ -221,6 +221,9 @@ model Template {
   campaigns    Campaign[]
 
   @@unique([organizationId, name, language])
+  // meta_name é o que vai para a Meta; precisa ser único por organização e
+  // idioma tanto quanto o rótulo — ver 014_templates_por_dono.sql.
+  @@unique([organizationId, metaName, language])
   @@map("templates")
 }
 

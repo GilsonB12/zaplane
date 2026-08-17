@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { TemplatesService } from './templates.service';
 import { prefixoDaOrg } from './meta-nome';
@@ -270,5 +270,36 @@ describe('TemplatesService.create', () => {
     await expect(s.create(ORG, { ...dto, name: '!!! ---' }, { plataforma: false }))
       .rejects.toThrow(BadRequestException);
     expect(prisma.template.create).not.toHaveBeenCalled();
+  });
+
+  it('dois rotulos que normalizam igual: o segundo e recusado antes de qualquer chamada a Meta', async () => {
+    // findFirst de verdade (não sempre-null): busca pelo meta_name entre o
+    // que já foi criado, exatamente como a checagem de duplicata faz.
+    const criados: any[] = [];
+    const prisma: any = {
+      whatsappChannel: { findFirst: jest.fn().mockResolvedValue({
+        connectedVia: 'assisted', wabaId: 'WABA_ZAPLANE', accessTokenEnc: '' }) },
+      template: {
+        findFirst: jest.fn(({ where }: any) =>
+          Promise.resolve(criados.find((t) => t.metaName === where.metaName) ?? null)),
+        create: jest.fn((a: any) => {
+          criados.push(a.data);
+          return Promise.resolve({ id: `t${criados.length}`, ...a.data });
+        }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const s = new TemplatesService(prisma, cfg(COMPLETA), {} as any);
+    (s as any).submitToMeta = jest.fn().mockResolvedValue({ id: 'meta-1' });
+
+    await s.create(ORG, { ...dto, name: 'Promoção de Banho' }, { plataforma: false });
+    (s as any).submitToMeta.mockClear();
+
+    await expect(
+      s.create(ORG, { ...dto, name: 'PROMOÇÃO DE BANHO!!!' }, { plataforma: false }),
+    ).rejects.toThrow(ConflictException);
+    // a checagem de duplicata barra antes de tentar submeter à Meta
+    expect((s as any).submitToMeta).not.toHaveBeenCalled();
+    expect(criados).toHaveLength(1);
   });
 });

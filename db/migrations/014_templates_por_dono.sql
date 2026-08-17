@@ -18,6 +18,18 @@ ALTER TABLE templates ALTER COLUMN meta_name SET NOT NULL;
 COMMENT ON COLUMN templates.meta_name IS
   'Nome do template na Meta (com prefixo da organização). É este que vai no envio, nunca o name.';
 
+-- quem precisa ser único por organização e idioma é o meta_name (o que vai
+-- para a Meta), não o name (rótulo que o cliente digita). Sem esta trava,
+-- dois rótulos diferentes que normalizam para o mesmo meta_name (ex.:
+-- "Promoção de Banho" e "PROMOÇÃO DE BANHO!!!") passavam pela checagem em
+-- nível de aplicação — que ainda comparava o rótulo — e só colidiam ao
+-- chegar na Meta; como a submissão é best-effort, a falha ficava engolida e
+-- o segundo rascunho ficava preso em PENDING para sempre, sem rota de saída
+-- (não existe DELETE /templates/:id).
+ALTER TABLE templates DROP CONSTRAINT IF EXISTS templates_organization_id_meta_name_language_key;
+ALTER TABLE templates ADD CONSTRAINT templates_organization_id_meta_name_language_key
+  UNIQUE (organization_id, meta_name, language);
+
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'org';
 ALTER TABLE templates DROP CONSTRAINT IF EXISTS templates_scope_check;
 ALTER TABLE templates ADD CONSTRAINT templates_scope_check
