@@ -41,6 +41,7 @@ model User {
   name           String?
   role           String    @default("operator")
   status         String    @default("active")
+  isPlatformAdmin Boolean   @default(false) @map("is_platform_admin")
   lastLoginAt    DateTime? @map("last_login_at") @db.Timestamptz(6)
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
@@ -203,8 +204,10 @@ model List {
 
 model Template {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId String   @map("organization_id") @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
   name           String
+  metaName       String   @map("meta_name")
+  scope          String   @default("org")
   language       String   @default("pt_BR")
   category       String
   status         String   @default("PENDING")
@@ -214,7 +217,7 @@ model Template {
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   campaigns    Campaign[]
 
   @@unique([organizationId, name, language])

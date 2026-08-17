@@ -72,6 +72,10 @@ export class TemplatesService {
           data: {
             organizationId: orgId,
             name: r.name,
+            // TODO(templates-por-dono): ainda sem prefixo por organização —
+            // enquanto o isolamento não chega, meta_name replica o nome que
+            // já está na Meta (mesmo comportamento de antes da 014).
+            metaName: r.name,
             language: r.language,
             body,
             variablesCount: body != null ? countVariables(body) : 0,
@@ -100,6 +104,8 @@ export class TemplatesService {
       data: {
         organizationId: orgId,
         name: dto.name,
+        // TODO(templates-por-dono): idem — sem prefixo por organização ainda.
+        metaName: dto.name,
         language,
         category: dto.category,
         status: 'PENDING',
