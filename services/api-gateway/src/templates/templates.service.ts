@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PlataformaService } from '../common/plataforma.service';
 import { decrypt } from '../common/crypto.util';
 import { CreateTemplateDto } from './dto/create-template.dto';
+import { PREFIXO_PLATAFORMA, prefixoDaOrg } from './meta-nome';
 
 @Injectable()
 export class TemplatesService {
@@ -21,8 +22,18 @@ export class TemplatesService {
   /**
    * Sincroniza os templates a partir da Meta (fonte da verdade): status de
    * aprovação, categoria (a Meta pode recategorizar na análise) e corpo.
-   * Upsert por (org, name, language); templates criados direto no painel da
-   * Meta passam a existir localmente. Env-gated: sem canal real, não faz nada.
+   *
+   * Duas regras, nesta ordem — é o que fecha o vazamento entre organizações
+   * que dividem a mesma WABA (canal assistido ou legado apontando para a
+   * mesma conta):
+   *   1) template já rastreado por `metaTemplateId`: atualiza. Mantém o
+   *      legado funcionando, inclusive templates sem prefixo criados antes
+   *      desta mudança.
+   *   2) template novo: só vira linha se o nome começar com o prefixo desta
+   *      organização ou com o prefixo dos genéricos da plataforma. Qualquer
+   *      outro nome é template de outro cliente e é ignorado.
+   *
+   * Env-gated: sem canal real, não faz nada.
    */
   async sync(orgId: string) {
     const credenciais = await this.resolverCredenciais(orgId);
@@ -31,20 +42,14 @@ export class TemplatesService {
     }
     const { wabaId, token } = credenciais;
 
-    const version = this.config.get<string>('whatsapp.graphVersion');
+    // orgId vem sempre do JWT e é um UUID; se prefixoDaOrg lançar aqui é sinal
+    // de dado corrompido, não de entrada de usuário. Deixa propagar (vira 500)
+    // em vez de engolir em silêncio e fingir que sincronizou.
+    const prefixoOrg = prefixoDaOrg(orgId);
 
-    // GET /message_templates paginado (paging.next já vem como URL completa)
-    const remotos: any[] = [];
+    let remotos: any[];
     try {
-      let url: string | undefined =
-        `https://graph.facebook.com/${version}/${wabaId}/message_templates?limit=100`;
-      let paginas = 0;
-      while (url && paginas < 10) {
-        const { data } = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
-        remotos.push(...(data?.data ?? []));
-        url = data?.paging?.next;
-        paginas++;
-      }
+      remotos = await this.buscarRemotos(wabaId, token);
     } catch (e: any) {
       const detalhe = e?.response?.data?.error?.message ?? e?.message ?? String(e);
       return { synced: false, note: `Falha ao consultar a Meta: ${detalhe}` };
@@ -52,44 +57,72 @@ export class TemplatesService {
 
     let atualizados = 0;
     let criados = 0;
+    let ignorados = 0;
+
     for (const r of remotos) {
-      if (!r?.name || !r?.language) continue;
+      if (!r?.name || !r?.language) { ignorados++; continue; }
+
       const body: string | null =
         (r.components ?? []).find((c: any) => c?.type === 'BODY')?.text ?? null;
       const campos = {
         category: r.category ?? 'MARKETING',
         status: statusLocal(r.status),
-        metaTemplateId: r.id ?? null,
         ...(body != null ? { body, variablesCount: countVariables(body) } : {}),
       };
-      const existente = await this.prisma.template.findFirst({
-        where: { organizationId: orgId, name: r.name, language: r.language },
-      });
-      if (existente) {
-        await this.prisma.template.update({ where: { id: existente.id }, data: campos });
+
+      // 1) já rastreado (por id global da Meta, não por nome dentro da
+      //    organização — buscar por nome recriaria o vazamento): atualiza.
+      const conhecido = r.id
+        ? await this.prisma.template.findFirst({ where: { metaTemplateId: r.id } })
+        : null;
+      if (conhecido) {
+        await this.prisma.template.update({ where: { id: conhecido.id }, data: campos });
         atualizados++;
-      } else {
-        await this.prisma.template.create({
-          data: {
-            organizationId: orgId,
-            name: r.name,
-            // TODO(templates-por-dono): ainda sem prefixo por organização —
-            // enquanto o isolamento não chega, meta_name replica o nome que
-            // já está na Meta (mesmo comportamento de antes da 014).
-            metaName: r.name,
-            language: r.language,
-            body,
-            variablesCount: body != null ? countVariables(body) : 0,
-            category: campos.category,
-            status: campos.status,
-            metaTemplateId: campos.metaTemplateId,
-          },
-        });
-        criados++;
+        continue;
       }
+
+      // 2) carrega o prefixo desta organização, ou o dos genéricos. Qualquer
+      //    outra coisa é template de outro cliente: NÃO vira linha de
+      //    ninguém — é este `continue` que fecha o vazamento.
+      const daOrg = r.name.startsWith(`${prefixoOrg}_`);
+      const daPlataforma = r.name.startsWith(`${PREFIXO_PLATAFORMA}_`);
+      if (!daOrg && !daPlataforma) { ignorados++; continue; }
+
+      await this.prisma.template.create({
+        data: {
+          organizationId: daPlataforma ? null : orgId,
+          scope: daPlataforma ? 'platform' : 'org',
+          name: r.name.slice((daPlataforma ? PREFIXO_PLATAFORMA : prefixoOrg).length + 1),
+          metaName: r.name,
+          language: r.language,
+          body,
+          variablesCount: body != null ? countVariables(body) : 0,
+          category: campos.category,
+          status: campos.status,
+          metaTemplateId: r.id ?? null,
+        },
+      });
+      criados++;
     }
 
-    return { synced: true, total: remotos.length, atualizados, criados };
+    return { synced: true, total: remotos.length, atualizados, criados, ignorados };
+  }
+
+  /** GET /{waba}/message_templates, paginado. Separado de `sync` para o teste
+   *  poder exercitar a regra de importação sem falar com a rede. */
+  private async buscarRemotos(wabaId: string, token: string): Promise<any[]> {
+    const version = this.config.get<string>('whatsapp.graphVersion');
+    const remotos: any[] = [];
+    let url: string | undefined =
+      `https://graph.facebook.com/${version}/${wabaId}/message_templates?limit=100`;
+    let paginas = 0;
+    while (url && paginas < 10) {
+      const { data } = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+      remotos.push(...(data?.data ?? []));
+      url = data?.paging?.next;
+      paginas++;
+    }
+    return remotos;
   }
 
   async create(orgId: string, dto: CreateTemplateDto) {
