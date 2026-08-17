@@ -43,7 +43,8 @@ function montar(over: any = {}) {
     ...over.meta,
   };
   const config = { get: (k: string) => (k === 'assisted' ? CFG : undefined) };
-  return { svc: new AssistedService(prisma as any, config as any, meta as any), prisma, meta };
+  const templates = { sync: jest.fn().mockResolvedValue({ synced: true, total: 0, atualizados: 0, criados: 0 }), ...over.templates };
+  return { svc: new AssistedService(prisma as any, config as any, meta as any, templates as any), prisma, meta, templates };
 }
 
 const DTO = { telefone: '(85) 99999-9999', nomeExibicao: 'Loja do Zé', aceitouPreRequisito: true };
@@ -313,6 +314,7 @@ describe('AssistedService.verificar', () => {
         ...over.prisma,
       },
       meta: over.meta,
+      templates: over.templates,
     });
 
   it('nunca persiste o código de 6 dígitos', async () => {
@@ -573,7 +575,7 @@ describe('AssistedService.verificar', () => {
   // as asserções abaixo indexam os argumentos da chamada, e não tentam casar
   // por substring de SQL.
   it('grava channel.connect.registered com o hash do telefone (nao com dado sensivel) e o canalId em metadata', async () => {
-    const { svc, prisma } = comReq({
+    const { svc, prisma, templates } = comReq({
       prisma: {
         whatsappChannel: {
           count: jest.fn(), findFirst: jest.fn().mockResolvedValue(null),
@@ -588,6 +590,20 @@ describe('AssistedService.verificar', () => {
     // resource_id (4º valor interpolado) é o HASH, nunca o telefone/dado sensível
     expect(registrado![4]).toBe('HASH_FIXO_REQ');
     expect(JSON.parse(registrado![5])).toEqual({ canalId: 'CANAL_XYZ' });
+    // traz os genéricos da plataforma para o cliente recém-conectado
+    expect(templates.sync).toHaveBeenCalledWith(ORG);
+  });
+
+  it('falha do sync de templates nao derruba a conexao', async () => {
+    // A vaga já foi consumida na Meta neste ponto do fluxo — falha ao trazer
+    // os templates genéricos não pode virar erro para o cliente nem desfazer
+    // a conexão, ou ele tentaria de novo e queimaria outra vaga.
+    const avisoLog = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined as any);
+    const { svc } = comReq({ templates: { sync: jest.fn().mockRejectedValue(new Error('meta fora')) } });
+    const resultado = await svc.verificar(ORG, 'REQ', '123456');
+    expect(resultado.canalId).toBeDefined();
+    expect(avisoLog).toHaveBeenCalledWith(expect.stringContaining('sync de templates falhou'));
+    avisoLog.mockRestore();
   });
 
   it('grava channel.connect.verify_failed com o hash do telefone, as tentativas e o codigo numerico da Meta', async () => {

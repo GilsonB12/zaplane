@@ -95,6 +95,7 @@ psql "$PGURL" -f db/migrations/010_channel_payment_ack.sql
 psql "$PGURL" -f db/migrations/011_password_reset.sql
 psql "$PGURL" -f db/migrations/012_queue_resilience.sql
 psql "$PGURL" -f db/migrations/013_conexao_assistida.sql
+psql "$PGURL" -f db/migrations/014_templates_por_dono.sql
 ```
 
 > **Não** rode `002_seed_dev.sql` — é dado de exemplo, não produção.
@@ -594,3 +595,30 @@ Um mesmo código repetido em organizações diferentes quase nunca é problema d
 cliente: é token expirado, WABA lotada ou mudança de versão da Graph API. Nesse
 caso, olhe o log do `zaplane-gateway` (as falhas de `contarNumeros` e
 `inscreverWebhook` só existem lá) antes de responder ao cliente.
+
+### 12.5 Templates genéricos da plataforma
+
+Depois que o número é registrado, a conexão assistida chama `templates.sync`
+sozinha, em best-effort: se falhar, fica só um `WARN` no log do gateway
+(logger `ConexaoAssistida`) — o cliente não vê erro nem perde a conexão,
+porque a vaga já foi consumida naquele ponto. É esse sync que importa, para a
+organização recém-conectada, os templates com o prefixo dos genéricos da
+plataforma (`zaplane_...`), para o cliente conseguir disparar já no primeiro
+dia em vez de esperar a análise da Meta.
+
+Quem pode **criar** um template genérico novo (`POST /templates/platform`)
+precisa estar marcado como operador da plataforma — um nível acima do `role`
+por organização (owner/admin/operator/viewer), na coluna
+`users.is_platform_admin` (migração `014`). Para ligar um:
+
+```sql
+UPDATE users SET is_platform_admin = true WHERE email = 'operador@zaplane.com.br';
+```
+
+> A WABA da plataforma (`1972668750117567`) já tem dois templates aprovados,
+> `zaplane_teste_entrega` e `zaplane_conexao_confirmada`, criados em teste
+> manual antes desta mudança existir. Como os dois já carregam o prefixo dos
+> genéricos, o primeiro `sync` depois do deploy os adota automaticamente como
+> templates de plataforma — sem migração especial, sem recriar nada. Se eles
+> aparecerem sozinhos na lista de templates de um cliente recém-conectado, é
+> esperado, não bug.

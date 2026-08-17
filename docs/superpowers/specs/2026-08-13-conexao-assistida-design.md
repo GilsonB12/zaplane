@@ -300,7 +300,7 @@ Registrado explicitamente para não virar dívida esquecida:
 
 | Pendência | Por que fica fora | Gatilho |
 |---|---|---|
-| **Namespace de templates** — `templates.sync` importa *todos* os templates da WABA para a org que chamar, e como o envio usa o **nome**, o cliente B consegue disparar o template do cliente A | Trabalho próprio (prefixo por org, coluna `meta_name`, filtro no sync, migração) e só se manifesta com dois clientes na mesma WABA | **Obrigatório antes de conectar o segundo cliente.** Até lá o fluxo assistido **não chama `templates.sync`** |
+| ~~**Namespace de templates** — `templates.sync` importa *todos* os templates da WABA para a org que chamar, e como o envio usa o **nome**, o cliente B consegue disparar o template do cliente A~~ **RESOLVIDA** — ver `docs/superpowers/specs/2026-08-17-templates-por-dono-design.md`: prefixo por dono, coluna `meta_name`/`scope`, migração `014_templates_por_dono.sql` e sync filtrado por dono. Com a trava fechada, o fluxo assistido passou a **chamar** `templates.sync` (best-effort) logo depois de conectar, para trazer os genéricos da plataforma ao cliente recém-conectado | Trabalho próprio (prefixo por org, coluna `meta_name`, filtro no sync, migração) e só se manifesta com dois clientes na mesma WABA | ~~**Obrigatório antes de conectar o segundo cliente.** Até lá o fluxo assistido **não chama `templates.sync`**~~ |
 | **Lista de tarefas do operador** para remover número da Meta | `DELETE /{pnid}` não funciona; exige interface | Antes do primeiro cancelamento de cliente |
 | **`WHATSAPP_APP_SECRET` obrigatório em produção** — hoje o default é `''`, e vazio faz **toda** validação de webhook falhar em silêncio | One-liner, não pertence a este fluxo | Próximo deploy |
 

@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { randomInt } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TemplatesService } from '../../templates/templates.service';
 import { decrypt, encrypt, phoneHash } from '../../common/crypto.util';
 import { MetaNumerosClient } from './meta-numeros.client';
 import { normalizarTelefoneBR, mascarar, TelefoneInvalidoError } from './telefone';
@@ -35,6 +36,7 @@ export class AssistedService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly meta: MetaNumerosClient,
+    private readonly templates: TemplatesService,
   ) {}
 
   private cfg() {
@@ -516,6 +518,15 @@ export class AssistedService {
       data: { status: 'concluida', channelId: canal.id },
     });
     await this.auditar(orgId, req.createdBy, 'channel.connect.registered', req.phoneHash, { canalId: canal.id });
+
+    // Traz os genéricos da plataforma para o cliente recém-conectado. Falha aqui
+    // não desfaz nada: o número já está registrado e a vaga já foi consumida.
+    try {
+      await this.templates.sync(orgId);
+    } catch (e) {
+      this.logger.warn(`sync de templates falhou após conectar (org ${orgId}): ${e}`);
+    }
+
     return { canalId: canal.id };
   }
 
