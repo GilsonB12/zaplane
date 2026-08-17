@@ -1,8 +1,17 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import axios from 'axios';
 import { TemplatesService } from './templates.service';
 import { PlataformaService } from '../common/plataforma.service';
 import { prefixoDaOrg } from './meta-nome';
+
+// axios mockado no arquivo inteiro: nenhum teste daqui pode alcançar a rede, e
+// é o que deixa "a submissão não aconteceu" ser afirmado de verdade
+// (`axios.post` não chamado) em vez de inferido do valor de retorno.
+jest.mock('axios');
+
+// sem isto, "axios.post não foi chamado" herdaria as chamadas do teste anterior
+beforeEach(() => jest.clearAllMocks());
 
 const cfg = (vals: Record<string, any>) => ({ get: (k: string) => vals[k] } as any);
 const COMPLETA = {
@@ -433,9 +442,10 @@ describe('TemplatesService — rastro no servidor quando a Meta recusa', () => {
     expect(registrado).not.toContain('TOKEN_PLATAFORMA');
   });
 
-  it('template que nem chega a ser submetido (sem credencial) tambem deixa rastro', async () => {
-    // É o caso da linha morta: nasce PENDING, sem id da Meta, sem rota de
-    // reenvio nem de exclusão — e antes disto acontecia em silêncio absoluto.
+  it('template da organizacao que nem chega a ser submetido (sem canal) deixa rastro', async () => {
+    // Rascunho legítimo: o cliente ainda não conectou canal nenhum, a linha
+    // fica dele, ele a vê na tela e o sync a adota depois pelo prefixo. O que
+    // não pode é isso acontecer em silêncio, como acontecia.
     const prisma: any = {
       whatsappChannel: { findFirst: jest.fn().mockResolvedValue(null) },
       template: {
@@ -448,9 +458,128 @@ describe('TemplatesService — rastro no servidor quando a Meta recusa', () => {
     const warn = espiar(s);
 
     const r: any = await s.create(ORG, { name: 'Lembrete', category: 'UTILITY', body: 'oi' } as any,
-      { plataforma: true });
+      { plataforma: false });
 
     expect(r.metaWarning).toBeTruthy();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('NÃO submetido à Meta'));
+  });
+});
+
+// Gêmeo do Critical, do outro lado do arquivo: `sync()` descartava o
+// `plataforma` de resolverCredenciais e adotava template alheio COMO genérico;
+// `submitToMeta` o descartava e criaria o genérico DENTRO da WABA de um
+// cliente. Mesma forma, sinal trocado.
+describe('TemplatesService.create — generico exige a WABA da plataforma', () => {
+  const ORG = 'cc96458b-1239-4906-b23b-45d27545b620';
+  const dto = { name: 'Lembrete de agendamento', category: 'UTILITY', body: 'oi' } as any;
+
+  const servico = (canal: any) => {
+    const prisma: any = {
+      whatsappChannel: { findFirst: jest.fn().mockResolvedValue(canal) },
+      template: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn((a: any) => Promise.resolve({ id: 't1', ...a.data })),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const s = new TemplatesService(prisma, cfg(COMPLETA), plataformaCom());
+    const warn = jest.spyOn((s as any).logger, 'warn').mockImplementation(() => {});
+    return { s, prisma, warn };
+  };
+
+  const CANAL_LEGADO = { connectedVia: 'manual', wabaId: 'WABA_PROPRIA', accessTokenEnc: 'TOKEN_CLIENTE' };
+  const CANAL_PLATAFORMA = { connectedVia: 'assisted', wabaId: 'WABA_ZAPLANE', accessTokenEnc: '' };
+
+  it('operador cujo canal esta em OUTRA WABA: recusa, nao grava nada e nao chama a Meta', async () => {
+    const { s, prisma, warn } = servico(CANAL_LEGADO);
+
+    await expect(s.create(ORG, dto, { plataforma: true })).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    // o ponto todo da recusa vir ANTES de gravar: sem linha, não há rascunho
+    // preso — a linha `scope: 'platform'` PENDING seria visível para todo
+    // cliente assistido e não teria rota de conserto pela aplicação
+    expect(prisma.template.create).not.toHaveBeenCalled();
+    expect(axios.post).not.toHaveBeenCalled();
+    // e a operação enxerga o motivo
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('recusado criar template genérico'));
+  });
+
+  it('operador sem canal ativo nenhum: mesma recusa, pelo mesmo motivo', async () => {
+    const { s, prisma, warn } = servico(null);
+    await expect(s.create(ORG, dto, { plataforma: true })).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(prisma.template.create).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('recusado criar template genérico'));
+  });
+
+  it('a recusa diz ao operador o que fazer, sem falhar calado', async () => {
+    const { s } = servico(CANAL_LEGADO);
+    await expect(s.create(ORG, dto, { plataforma: true })).rejects.toThrow(/canal ativo na WABA da Zaplane/);
+    await expect(s.create(ORG, dto, { plataforma: true })).rejects.toThrow(/Nada foi salvo/);
+  });
+
+  it('operador na WABA da plataforma cria normalmente — a trava e estreita', async () => {
+    const { s, prisma } = servico(CANAL_PLATAFORMA);
+    (axios.post as jest.Mock).mockResolvedValue({ data: { id: 'meta-1' } });
+    await expect(s.create(ORG, dto, { plataforma: true })).resolves.toMatchObject({ scope: 'platform' });
+    expect(prisma.template.create).toHaveBeenCalled();
+  });
+
+  it('template da propria organizacao NAO e afetado: canal em WABA propria cria e submete', async () => {
+    // a trava é sobre escopo de plataforma; o caminho do cliente comum segue
+    // exatamente como era, inclusive submetendo pela WABA dele
+    const { s, prisma } = servico(CANAL_LEGADO);
+    (axios.post as jest.Mock).mockResolvedValue({ data: { id: 'meta-2' } });
+    await expect(s.create(ORG, dto, { plataforma: false })).resolves.toMatchObject({ scope: 'org' });
+    expect(prisma.template.create).toHaveBeenCalled();
+    expect(axios.post).toHaveBeenCalled();
+  });
+});
+
+describe('TemplatesService.submitToMeta — ultima linha de defesa', () => {
+  const ORG = 'cc96458b-1239-4906-b23b-45d27545b620';
+  const submeter = (s: TemplatesService, scope: string) =>
+    (s as any).submitToMeta(ORG, {
+      metaName: 'zaplane_lembrete', language: 'pt_BR', category: 'UTILITY',
+      body: 'oi', variablesCount: 0, scope,
+    });
+
+  it('escopo de plataforma + credenciais que NAO sao da plataforma: nao submete', async () => {
+    // O cenário exato do gêmeo. Submeter aqui criaria `zaplane_lembrete` dentro
+    // da WABA de um cliente, e a linha local (scope 'platform', visível a todo
+    // cliente assistido) passaria a apontar para um template que não existe na
+    // WABA de onde eles enviam — 132001 no disparo, para todos.
+    const s = new TemplatesService(
+      prismaCom({ connectedVia: 'manual', wabaId: 'WABA_PROPRIA', accessTokenEnc: 'TOKEN_CLIENTE' }),
+      cfg(COMPLETA), plataformaCom(),
+    );
+
+    const r = await submeter(s, 'platform');
+
+    expect(axios.post).not.toHaveBeenCalled();
+    expect(r.id).toBeUndefined();
+    expect(r.skipped).toBeTruthy();
+  });
+
+  it('escopo de plataforma + credenciais da plataforma: submete', async () => {
+    const s = new TemplatesService(
+      prismaCom({ connectedVia: 'assisted', wabaId: 'WABA_ZAPLANE', accessTokenEnc: '' }),
+      cfg(COMPLETA), plataformaCom(),
+    );
+    (axios.post as jest.Mock).mockResolvedValue({ data: { id: 'meta-3' } });
+
+    expect((await submeter(s, 'platform')).id).toBe('meta-3');
+    // e vai para a WABA da plataforma, não para outra
+    expect((axios.post as jest.Mock).mock.calls[0][0]).toContain('WABA_ZAPLANE');
+  });
+
+  it('escopo de organizacao pelas credenciais dela: submete — a trava nao pega o caminho comum', async () => {
+    const s = new TemplatesService(
+      prismaCom({ connectedVia: 'manual', wabaId: 'WABA_PROPRIA', accessTokenEnc: 'TOKEN_CLIENTE' }),
+      cfg(COMPLETA), plataformaCom(),
+    );
+    (axios.post as jest.Mock).mockResolvedValue({ data: { id: 'meta-4' } });
+
+    expect((await submeter(s, 'org')).id).toBe('meta-4');
+    expect((axios.post as jest.Mock).mock.calls[0][0]).toContain('WABA_PROPRIA');
   });
 });

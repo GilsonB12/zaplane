@@ -1,4 +1,6 @@
-import { BadRequestException, ConflictException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException, ConflictException, Injectable, Logger, ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import axios from 'axios';
@@ -258,6 +260,10 @@ export class TemplatesService {
       throw new ConflictException('Já existe um template equivalente a este nome nesse idioma.');
     }
 
+    // Genérico só pode nascer se houver a WABA da plataforma para recebê-lo — e
+    // a recusa tem de vir ANTES de gravar. Ver o método abaixo.
+    if (opts.plataforma) await this.garantirCredencialDaPlataforma(orgId);
+
     const template = await this.prisma.template.create({
       data: {
         organizationId: opts.plataforma ? null : orgId,
@@ -307,13 +313,67 @@ export class TemplatesService {
     return { ...template, metaWarning };
   }
 
+  /** Um genérico só existe se houver a WABA da plataforma para recebê-lo.
+   *
+   *  `submitToMeta` resolve a credencial pela organização de QUEM CHAMOU, e um
+   *  operador de plataforma pode perfeitamente pertencer a uma organização com
+   *  canal em WABA própria (ou sem canal nenhum) — o runbook documenta isso como
+   *  pré-condição em `docs/RAILWAY-MIGRATION.md §12.5`, mas garantia que mora só
+   *  em runbook decai: daqui a seis meses alguém provisiona uma conta sem ler.
+   *
+   *  Recusa ANTES de gravar, e não depois, porque as duas alternativas produzem
+   *  o mesmo estado que esta branch existiu para eliminar: uma linha
+   *  `scope: 'platform'` PENDING, sem id da Meta, **já visível para todo cliente
+   *  assistido**, sem rota de reenvio nem de exclusão, e que ainda toma 409 ao
+   *  ser recriada — só sai por SQL no banco. Não gravar nada é o único desfecho
+   *  em que ninguém fica preso.
+   *
+   *  503 e não 400 pelo mesmo motivo escrito em
+   *  `AssistedController.garantirDisponivel`: o pedido está correto, quem não
+   *  está pronta é a nossa ligação com a Meta — culpar o pedido mandaria o
+   *  operador procurar defeito no texto que ele digitou. E como quem chama aqui
+   *  é a operação da Zaplane, e não um cliente, a mensagem pode nomear a
+   *  pré-condição exata sem virar oráculo para inquilino nenhum. */
+  private async garantirCredencialDaPlataforma(orgId: string): Promise<void> {
+    const credenciais = await this.resolverCredenciais(orgId);
+    if (credenciais?.plataforma) return;
+    const motivo = credenciais
+      ? 'a organização dele tem canal ativo, mas em outra WABA'
+      : 'a organização dele não tem canal ativo utilizável';
+    this.logger.warn(
+      `create org=${orgId}: recusado criar template genérico — ${motivo}. Nada foi gravado. Ver docs/RAILWAY-MIGRATION.md §12.5.`,
+    );
+    throw new ServiceUnavailableException(
+      'Não é possível criar template genérico por esta conta: a organização dela precisa ter um canal ativo na WABA da Zaplane. Nada foi salvo.',
+    );
+  }
+
   private async submitToMeta(
     orgId: string,
-    template: { metaName: string; language: string; category: string; body: string | null; variablesCount: number },
+    template: {
+      metaName: string; language: string; category: string;
+      body: string | null; variablesCount: number; scope: string;
+    },
   ): Promise<{ id?: string; skipped?: string }> {
     const credenciais = await this.resolverCredenciais(orgId);
     if (!credenciais) {
       return { skipped: 'Sem canal Meta configurado; template salvo apenas localmente.' };
+    }
+    // Gêmeo da regra do sync(): `plataforma` diz se a WABA que acabamos de
+    // resolver é a da Zaplane, e descartá-lo aqui é o mesmo defeito de lá com o
+    // sinal trocado — em vez de adotar template alheio COMO genérico, criaria o
+    // genérico DENTRO da WABA de um cliente. A linha local nasceria
+    // `scope: 'platform'` apontando (via meta_template_id) para um template que
+    // não existe na WABA de onde os clientes assistidos enviam: 132001 no
+    // disparo, para todos eles.
+    //
+    // `create()` já barra este caso antes de gravar (garantirCredencialDaPlataforma
+    // acima), então na prática isto é inalcançável hoje. Fica como última linha
+    // de defesa, junto do código que faz o POST: quem escrever o próximo chamador
+    // não precisa saber da trava que mora lá em cima para não mandar genérico
+    // para a WABA errada.
+    if (template.scope === 'platform' && !credenciais.plataforma) {
+      return { skipped: 'Template genérico não é submetido por credenciais que não são da plataforma.' };
     }
     const { wabaId, token } = credenciais;
     const version = this.config.get<string>('whatsapp.graphVersion');
