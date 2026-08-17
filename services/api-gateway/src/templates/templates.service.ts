@@ -1,5 +1,6 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { PlataformaService } from '../common/plataforma.service';
@@ -9,6 +10,8 @@ import { PREFIXO_PLATAFORMA, prefixoDaOrg } from './meta-nome';
 
 @Injectable()
 export class TemplatesService {
+  private readonly logger = new Logger('TemplatesSync');
+
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
@@ -26,12 +29,19 @@ export class TemplatesService {
    * Duas regras, nesta ordem — é o que fecha o vazamento entre organizações
    * que dividem a mesma WABA (canal assistido ou legado apontando para a
    * mesma conta):
-   *   1) template já rastreado por `metaTemplateId`: atualiza. Mantém o
+   *   1) template já rastreado por `metaTemplateId` E que pertence a esta
+   *      organização (ou é genérico da plataforma): atualiza. Mantém o
    *      legado funcionando, inclusive templates sem prefixo criados antes
-   *      desta mudança.
+   *      desta mudança. Rastreado por OUTRA organização é resíduo do
+   *      vazamento antigo: não atualiza, não cria — só ignora e registra.
    *   2) template novo: só vira linha se o nome começar com o prefixo desta
    *      organização ou com o prefixo dos genéricos da plataforma. Qualquer
    *      outro nome é template de outro cliente e é ignorado.
+   *
+   * A resposta ao cliente só conta o que foi processado para a própria
+   * organização; total/ignorados sobre a WABA inteira ficam só no log do
+   * servidor — devolvê-los ao cliente seria outro oráculo de contagem sobre
+   * os demais inquilinos.
    *
    * Env-gated: sem canal real, não faz nada.
    */
@@ -57,6 +67,9 @@ export class TemplatesService {
 
     let atualizados = 0;
     let criados = 0;
+    // conta também templates de outras organizações (residuo do vazamento
+    // antigo, ou nome sem prefixo reconhecido) — nunca sai na resposta ao
+    // cliente (ver retorno no fim do método); fica só no log do servidor.
     let ignorados = 0;
 
     for (const r of remotos) {
@@ -67,15 +80,28 @@ export class TemplatesService {
       const campos = {
         category: r.category ?? 'MARKETING',
         status: statusLocal(r.status),
+        metaTemplateId: r.id ?? null,
         ...(body != null ? { body, variablesCount: countVariables(body) } : {}),
       };
 
       // 1) já rastreado (por id global da Meta, não por nome dentro da
-      //    organização — buscar por nome recriaria o vazamento): atualiza.
+      //    organização — buscar por nome recriaria o vazamento): atualiza,
+      //    mas só se a linha já pertencer a esta organização ou for genérica
+      //    da plataforma. Linha de OUTRO dono é resíduo do vazamento antigo
+      //    (sync anterior a este isolamento importou o que não era dela): não
+      //    atualiza nem cria — só ignora e registra, para a operação limpar.
       const conhecido = r.id
         ? await this.prisma.template.findFirst({ where: { metaTemplateId: r.id } })
         : null;
       if (conhecido) {
+        const deDonoOuGenerico = conhecido.scope === 'platform' || conhecido.organizationId === orgId;
+        if (!deDonoOuGenerico) {
+          ignorados++;
+          this.logger.warn(
+            `sync org=${orgId}: template meta_template_id=${r.id} (${r.name}) já está rastreado por outra organização (linha local ${conhecido.id}) — resíduo do vazamento antigo, ignorado`,
+          );
+          continue;
+        }
         await this.prisma.template.update({ where: { id: conhecido.id }, data: campos });
         atualizados++;
         continue;
@@ -88,24 +114,48 @@ export class TemplatesService {
       const daPlataforma = r.name.startsWith(`${PREFIXO_PLATAFORMA}_`);
       if (!daOrg && !daPlataforma) { ignorados++; continue; }
 
-      await this.prisma.template.create({
-        data: {
-          organizationId: daPlataforma ? null : orgId,
-          scope: daPlataforma ? 'platform' : 'org',
-          name: r.name.slice((daPlataforma ? PREFIXO_PLATAFORMA : prefixoOrg).length + 1),
-          metaName: r.name,
-          language: r.language,
-          body,
-          variablesCount: body != null ? countVariables(body) : 0,
-          category: campos.category,
-          status: campos.status,
-          metaTemplateId: r.id ?? null,
-        },
-      });
-      criados++;
+      try {
+        await this.prisma.template.create({
+          data: {
+            organizationId: daPlataforma ? null : orgId,
+            scope: daPlataforma ? 'platform' : 'org',
+            name: r.name.slice((daPlataforma ? PREFIXO_PLATAFORMA : prefixoOrg).length + 1),
+            metaName: r.name,
+            language: r.language,
+            body,
+            variablesCount: body != null ? countVariables(body) : 0,
+            category: campos.category,
+            status: campos.status,
+            metaTemplateId: campos.metaTemplateId,
+          },
+        });
+        criados++;
+      } catch (e: unknown) {
+        // Índice único (organizationId, name, language): já existe linha
+        // local com essa identidade — ex. rascunho criado via create() cujo
+        // submitToMeta falhou e ficou com metaTemplateId nulo, e o template
+        // acabou existindo na Meta por outro caminho. Um conflito não pode
+        // derrubar o lote inteiro: ignora este template e segue os demais.
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+          ignorados++;
+          this.logger.warn(
+            `sync org=${orgId}: conflito de índice único ao criar "${r.name}" (meta_template_id=${r.id}) — já existe linha local com esse nome/idioma; ignorado`,
+          );
+          continue;
+        }
+        throw e;
+      }
     }
 
-    return { synced: true, total: remotos.length, atualizados, criados, ignorados };
+    this.logger.log(
+      `sync org=${orgId}: ${remotos.length} templates na WABA — ${atualizados} atualizados, ${criados} criados, ${ignorados} ignorados (inclui templates de outras organizações)`,
+    );
+
+    // A resposta ao cliente conta só o que é dele: total/ignorados sobre a
+    // WABA inteira entregariam quantos templates os outros inquilinos têm
+    // (mesma classe de vazamento que este isolamento fecha). Detalhe completo
+    // só no log acima.
+    return { synced: true, total: atualizados + criados, atualizados, criados };
   }
 
   /** GET /{waba}/message_templates, paginado. Separado de `sync` para o teste

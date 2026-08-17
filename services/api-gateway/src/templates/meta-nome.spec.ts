@@ -33,15 +33,15 @@ describe('normalizarNome', () => {
 });
 
 describe('prefixoDaOrg', () => {
-  it('usa z + 8 caracteres do uuid, sem hifen', () => {
-    expect(prefixoDaOrg(ORG)).toBe('zcc96458b');
+  it('usa z + 12 caracteres do uuid, sem hifen', () => {
+    expect(prefixoDaOrg(ORG)).toBe('zcc96458b1239');
   });
 
   it('e estavel para o mesmo id', () => {
     expect(prefixoDaOrg(ORG)).toBe(prefixoDaOrg(ORG));
   });
 
-  it('sempre tem 9 caracteres [a-z0-9] para todo uuid valido', () => {
+  it('sempre tem 13 caracteres [a-z0-9] para todo uuid valido', () => {
     // Valida a propriedade sobre vários UUIDs diferentes
     const uuids = [
       ORG,
@@ -51,31 +51,35 @@ describe('prefixoDaOrg', () => {
     ];
     uuids.forEach((uuid) => {
       const prefix = prefixoDaOrg(uuid);
-      expect(prefix).toHaveLength(9);
+      expect(prefix).toHaveLength(13);
       expect(prefix).toMatch(/^[a-z0-9]+$/);
       expect(prefix).toMatch(/^z/); // começa com 'z'
     });
   });
 
   it('nunca colide com o prefixo da plataforma', () => {
-    // 'zaplane' tem 7 caracteres; o da org tem sempre 9 por construção
+    // 'zaplane' tem 7 caracteres; o da org tem sempre 13 por construção
     // Portanto nunca é igual a PREFIXO_PLATAFORMA
     expect(prefixoDaOrg(ORG)).not.toBe(PREFIXO_PLATAFORMA);
   });
 
-  it('rejeita id de organizacao sem pelo menos 8 caracteres hexadecimais', () => {
-    // 'aplane' tem só 6 caracteres hexadecimais (a, p, l, a, n, e)
+  it('rejeita id de organizacao sem pelo menos 12 caracteres hexadecimais', () => {
+    // 'aplane' tem só 3 caracteres hexadecimais (a, a, e)
     // espera falha
     expect(() => prefixoDaOrg('aplane')).toThrow(NomeInvalidoError);
 
     // Entrada inválida com caracteres especiais também falha
     expect(() => prefixoDaOrg('Ω$$$-!!!!')).toThrow(NomeInvalidoError);
+
+    // 8 caracteres hexadecimais eram suficientes antes do alargamento (I4);
+    // agora exige 12 — este limiar continua falhando fechado
+    expect(() => prefixoDaOrg('aaaaaaaa')).toThrow(NomeInvalidoError);
   });
 });
 
 describe('meta_name', () => {
   it('monta o nome da organizacao', () => {
-    expect(metaNomeDaOrg(ORG, 'Promoção de Banho')).toBe('zcc96458b_promocao_de_banho');
+    expect(metaNomeDaOrg(ORG, 'Promoção de Banho')).toBe('zcc96458b1239_promocao_de_banho');
   });
 
   it('monta o nome da plataforma', () => {

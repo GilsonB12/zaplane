@@ -9,7 +9,7 @@
  *  renomeia a empresa, e a Meta não aceita hífen em nome de template. */
 
 /** Prefixo dos templates genéricos da Zaplane. 7 caracteres — o da organização
- *  tem sempre 9, então os dois nunca colidem. */
+ *  tem sempre 13, então os dois nunca colidem. */
 export const PREFIXO_PLATAFORMA = 'zaplane';
 
 const MAX_SUFIXO = 200;
@@ -21,22 +21,28 @@ export class NomeInvalidoError extends Error {
   }
 }
 
-/** `z` + 8 caracteres hexadecimais do UUID. O `z` inicial evita nome começando
- *  por dígito e marca o template como gerado pela Zaplane. Valida a entrada: só
- *  aceita strings com pelo menos 8 caracteres hexadecimais para garantir que o
- *  resultado tem sempre 9 caracteres de [a-z0-9] e nunca colide com
- *  PREFIXO_PLATAFORMA (7 caracteres). */
+/** `z` + 12 caracteres hexadecimais do UUID. O `z` inicial evita nome
+ *  começando por dígito e marca o template como gerado pela Zaplane. Valida a
+ *  entrada: só aceita strings com pelo menos 12 caracteres hexadecimais para
+ *  garantir que o resultado tem sempre 13 caracteres de [a-z0-9] e nunca
+ *  colide com PREFIXO_PLATAFORMA (7 caracteres).
+ *
+ *  8 caracteres (32 bits) permitiam colisão entre duas organizações — exatamente
+ *  o vazamento que este arquivo existe para impedir — e por isso o prefixo foi
+ *  alargado para 12 (48 bits) antes de qualquer cliente ter template prefixado.
+ *  Alargar depois disso teria custo real: renomear template já criado na Meta
+ *  é trabalho manual. */
 export function prefixoDaOrg(orgId: string): string {
   // Extrai só caracteres hexadecimais (0-9, a-f) do UUID
   const hex = (orgId ?? '').toLowerCase().match(/[0-9a-f]/g) || [];
 
-  // Exige pelo menos 8 caracteres hexadecimais; falha fechado se não tiver
-  if (hex.length < 8) {
+  // Exige pelo menos 12 caracteres hexadecimais; falha fechado se não tiver
+  if (hex.length < 12) {
     throw new NomeInvalidoError(`ID de organização inválido: "${orgId}"`);
   }
 
-  // Retorna z + 8 primeiros caracteres hexadecimais
-  return 'z' + hex.slice(0, 8).join('');
+  // Retorna z + 12 primeiros caracteres hexadecimais
+  return 'z' + hex.slice(0, 12).join('');
 }
 
 /** A Meta só aceita `[a-z0-9_]`. */
