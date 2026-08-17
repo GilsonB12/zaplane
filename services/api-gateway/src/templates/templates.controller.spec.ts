@@ -28,11 +28,17 @@ describe('TemplatesController — rota de plataforma e o guard que a protege', (
 });
 
 describe('TemplatesController — POST /templates/sync', () => {
-  it('exige papel de dono ou admin da organizacao', () => {
+  it('exige papel que possa mexer em template, e deixa o viewer de fora', () => {
     // A rota passou a dirigir o token de System User da PLATAFORMA quando quem
-    // chama é cliente assistido. Sem @Roles, um 'viewer' de qualquer cliente
-    // assistido gastava a cota da Graph API compartilhada com o dispatcher.
-    expect(Reflect.getMetadata(ROLES_KEY, TemplatesController.prototype.sync)).toEqual(['owner', 'admin']);
+    // chama é cliente assistido. Sem @Roles, um 'viewer' — conta somente-leitura
+    // de qualquer cliente assistido — gastava a cota da Graph API compartilhada
+    // com o dispatcher, que é quem entrega as mensagens de todo mundo.
+    const papeis = Reflect.getMetadata(ROLES_KEY, TemplatesController.prototype.sync);
+    expect(papeis).not.toContain('viewer');
+    // mesma lista de POST /templates: quem pode criar template tem de poder
+    // sincronizar o status dele — separar os dois seria incoerente
+    expect(papeis).toEqual(Reflect.getMetadata(ROLES_KEY, TemplatesController.prototype.create));
+    expect(papeis).toEqual(['owner', 'admin', 'operator']);
   });
 
   it('tem limite de taxa proprio, mais apertado que o global por inquilino', () => {

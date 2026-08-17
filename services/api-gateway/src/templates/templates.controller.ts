@@ -43,10 +43,14 @@ export class TemplatesController {
    *  `GET /{waba}/message_templates` por chamada) e gastava a cota da Graph API
    *  compartilhada, degradando a entrega dos outros clientes. Mesmo padrão de
    *  `AssistedController`, que já protege assim toda rota que consome recurso
-   *  real. Sincronizar é ação de configuração da conta, não de operação
-   *  diária — 'operator' e 'viewer' ficam de fora. */
+   *  real.
+   *
+   *  A lista de papéis é a mesma de `POST /` acima, e de propósito: quem pode
+   *  CRIAR template tem de poder sincronizar o status dele. Quem fica de fora é
+   *  o `viewer`, que era o buraco — conta somente-leitura dirigindo a credencial
+   *  da plataforma. O laço em si quem segura é o `@Throttle`, não o papel. */
   @Post('sync')
-  @Roles('owner', 'admin')
+  @Roles('owner', 'admin', 'operator')
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   sync(@CurrentUser('organizationId') orgId: string) {
     return this.templates.sync(orgId);
