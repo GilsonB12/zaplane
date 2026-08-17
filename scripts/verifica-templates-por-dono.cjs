@@ -54,19 +54,33 @@ const violouUnico = (e, indice) =>
     check('template de org sem dono é rejeitado', violou(erro, 'templates_escopo_dono_check'),
       erro ? `${erro.code}/${erro.constraint}` : 'nenhum erro');
 
-    // dois genéricos com o mesmo nome são rejeitados
+    // a partir desta rodada o índice de plataforma é sobre (meta_name,
+    // language), não mais (name, language) — meta_name é a chave de
+    // unicidade dos genéricos; o rótulo (name) deixou de ser. Dois genéricos
+    // com o MESMO rótulo mas meta_name diferente agora são permitidos: prova
+    // que a trava é mesmo sobre o que vai para a Meta, não sobre o rótulo.
     await c.query(
       `INSERT INTO templates (name, meta_name, scope, category)
        VALUES ('promo','zaplane_promo','platform','UTILITY')`);
+    await c.query(
+      `INSERT INTO templates (name, meta_name, scope, category)
+       VALUES ('promo','zaplane_promo2','platform','MARKETING')`);
+    check('dois genéricos podem ter o mesmo rótulo quando o meta_name é diferente', true);
+
+    // e o inverso é o que importa: dois genéricos com RÓTULOS diferentes que
+    // normalizam para o mesmo meta_name são rejeitados — mesma classe do
+    // achado anterior (organização), agora do lado da plataforma: "Lembrete
+    // de Agendamento" e "LEMBRETE DE AGENDAMENTO!!!" têm rótulo diferente mas
+    // meta_name igual; reaproveita o genérico 'zaplane_promo' inserido acima
     await c.query('SAVEPOINT s3');
     erro = null;
     try {
       await c.query(
         `INSERT INTO templates (name, meta_name, scope, category)
-         VALUES ('promo','zaplane_promo2','platform','MARKETING')`);
+         VALUES ('PROMO!!!','zaplane_promo','platform','MARKETING')`);
     } catch (e) { erro = e; }
     await c.query('ROLLBACK TO SAVEPOINT s3');
-    check('dois genéricos com o mesmo nome são rejeitados',
+    check('dois genéricos com rótulos diferentes que normalizam igual são rejeitados',
       violouUnico(erro, 'idx_templates_plataforma'),
       erro ? `${erro.code}/${erro.constraint}` : 'nenhum erro');
 

@@ -43,11 +43,17 @@ ALTER TABLE templates ADD CONSTRAINT templates_escopo_dono_check CHECK (
   (scope = 'platform' AND organization_id IS NULL)
 );
 
--- o UNIQUE (organization_id, name, language) não segura os genéricos: no
--- Postgres, NULL é distinto de NULL, então dois genéricos poderiam ter o
--- mesmo nome
+-- o UNIQUE (organization_id, meta_name, language) não segura os genéricos:
+-- no Postgres, NULL é distinto de NULL, então dois genéricos (organization_id
+-- sempre nulo) poderiam ter o mesmo meta_name. A unicidade que importa aqui é
+-- a do nome NA META, não a do rótulo — por isso o índice é sobre meta_name, e
+-- não sobre name: dois rótulos diferentes que normalizam para o mesmo
+-- meta_name (ex.: "Lembrete de Agendamento" e "LEMBRETE DE AGENDAMENTO!!!")
+-- têm que colidir aqui tanto quanto colidiriam se fossem de uma organização
+-- (ver a constraint UNIQUE acima).
+DROP INDEX IF EXISTS idx_templates_plataforma;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_templates_plataforma
-  ON templates (name, language) WHERE scope = 'platform';
+  ON templates (meta_name, language) WHERE scope = 'platform';
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_platform_admin BOOLEAN NOT NULL DEFAULT false;
 
