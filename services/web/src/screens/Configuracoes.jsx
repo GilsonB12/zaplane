@@ -329,7 +329,7 @@ function AbaBilling() {
 
         <p className="mt-3 inline-flex items-start gap-1.5 text-[11px] text-zinc-400">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Cada mensagem de template entregue pela Meta debita R$ 0,43 da carteira.
+          Cada mensagem de template entregue debita da carteira o preço da categoria: R$ 0,10 (utility) ou R$ 0,43 (marketing e autenticação).
         </p>
       </Card>
 
