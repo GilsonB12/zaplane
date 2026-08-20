@@ -121,6 +121,9 @@ export class AsaasProvider implements PaymentProviderAdapter {
       name: org.name,
       cpfCnpj,
       email: org.email || undefined,
+      // O painel é quem entrega o link de pagamento (paymentUrl); a notificação
+      // do Asaas é redundante e custa R$ 0,99 de "taxa de mensageria" por fatura.
+      notificationDisabled: true,
       externalReference: org.id,
     };
     const { data } = await this.call(() => this.http.post('/customers', payload), 'createCustomer');
