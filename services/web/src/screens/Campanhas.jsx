@@ -475,8 +475,8 @@ export function NovaCampanha({ setScreen, openCampaign }) {
                   <span className="shrink-0 text-zinc-500 dark:text-zinc-400">Taxa Zaplane (estimada)</span>
                   <span className="min-w-0 break-words font-medium text-zinc-800 dark:text-zinc-100 sm:text-right">
                     {taxaZaplaneEstimadaCents != null
-                      ? `${formatBRL(taxaZaplaneEstimadaCents)} (${estimativaDestinatarios.toLocaleString("pt-BR")} × R$ 0,43)`
-                      : "R$ 0,43 por mensagem elegível — total exato após confirmar"}
+                      ? `${formatBRL(taxaZaplaneEstimadaCents)} (${estimativaDestinatarios.toLocaleString("pt-BR")} × ${formatBRL(taxaUnitariaCents)})`
+                      : `${formatBRL(taxaUnitariaCents)} por mensagem elegível — total exato após confirmar`}
                   </span>
                 </div>
                 <div className="mt-1.5 flex flex-col gap-0.5 text-[12px] sm:flex-row sm:items-center sm:justify-between sm:gap-3">
